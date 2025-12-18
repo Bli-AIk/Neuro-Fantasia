@@ -1,66 +1,46 @@
 //! # Trainer CLI / 训练器 CLI
 //!
 //! Command-line interface to run the Neuro-Fantasia genetic algorithm.
-//! 运行 Neuro-Fantasia 遗传算法的命令行接口。
 
 use anyhow::{Context, Result};
 use clap::Parser;
 use neuro_fantasia::analysis::{AudioFeatures, extract_features};
 use neuro_fantasia::genetic::GeneticAlgorithm;
 use neuro_fantasia::resources::{WAVETABLES, WavetableBank};
-use neuro_fantasia::synth::PatchGenome;
+use neuro_fantasia::synth::{PatchGenome, render_sample};
 use serde::Deserialize;
-use std::fs::File;
+use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 
 /// Arguments for the CLI.
-/// CLI 参数。
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Path to the target folder containing 'dataset.json' and audio files, OR path to a single wav file.
-    /// 包含 'dataset.json' 和音频文件的目标文件夹路径，或者单个 wav 文件路径。
     #[arg(short, long)]
     target: PathBuf,
 
-    /// Target MIDI note (only used if --target is a single file).
-    /// 目标 MIDI 音符（仅当 --target 为单个文件时使用）。
     #[arg(long, default_value_t = 60.0)]
     note: f32,
 
-    /// Path to folder containing AKWF or other single-cycle waveforms.
-    /// 包含 AKWF 或其他单周期波形的文件夹路径。
     #[arg(short, long, default_value = "assets/AKWF")]
     assets: String,
 
-    /// Population size (Higher = better search, slower).
-    /// 种群大小（越高 = 搜索越好，但越慢）。
     #[arg(short, long, default_value_t = 100)]
     pop: usize,
 
-    /// Output JSON file for the best patch.
-    /// 最佳音色的输出 JSON 文件。
-    #[arg(short, long, default_value = "best_patch.json")]
-    out: PathBuf,
+    /// Output directory for results.
+    #[arg(short, long, default_value = "output")]
+    out_dir: PathBuf,
 
-    /// Number of generations to run.
-    /// 要运行的代数。
     #[arg(long, default_value_t = 1000)]
     gens: usize,
 
-    /// Stop training when similarity reaches this percentage (0-100).
-    /// 当相似度达到此百分比（0-100）时停止训练。
-    /// Calculated as: Similarity = 100% / (1.0 + Loss)
     #[arg(long)]
     similarity: Option<f32>,
 
-    /// Resume training from a previous patch JSON file.
-    /// 从以前的音色 JSON 文件恢复训练。
     #[arg(long)]
     resume: Option<PathBuf>,
 
-    /// Save interval in generations.
-    /// 保存间隔（代数）。
     #[arg(long, default_value_t = 10)]
     save_interval: usize,
 }
@@ -81,7 +61,10 @@ fn main() -> Result<()> {
 
     println!("-- Neuro-Fantasia: Sound Matcher --");
 
-    // 1. Load Resources / 1. 加载资源
+    // Create output directory
+    fs::create_dir_all(&args.out_dir)?;
+
+    // 1. Load Resources
     println!("Loading wavetables from '{}'...", args.assets);
     match WavetableBank::load_from_directory(&args.assets) {
         Ok(bank) => {
@@ -95,14 +78,14 @@ fn main() -> Result<()> {
         }
     }
 
-    // 2. Load Target(s) / 2. 加载目标
+    // 2. Load Targets
     let targets = load_targets(&args)?;
     if targets.is_empty() {
         anyhow::bail!("No targets found. Please check your target path or dataset.json.");
     }
     println!("Loaded {} target sample(s).", targets.len());
 
-    // 3. Load Resume Patch (Optional) / 3. 加载恢复音色（可选）
+    // 3. Load Resume Patch
     let seed_genome = if let Some(path) = &args.resume {
         if path.exists() {
             println!("Resuming from {:?}", path);
@@ -119,12 +102,7 @@ fn main() -> Result<()> {
         None
     };
 
-    // Calculate loss threshold from similarity
-    // 计算基于相似度的损失阈值
     let stop_loss = if let Some(sim_percent) = args.similarity {
-        // Similarity = 100 / (1 + Loss)
-        // 1 + Loss = 100 / Similarity
-        // Loss = (100 / Similarity) - 1
         let sim = sim_percent.clamp(0.1, 100.0);
         let thresh = (100.0 / sim) - 1.0;
         println!(
@@ -136,12 +114,12 @@ fn main() -> Result<()> {
         None
     };
 
-    // 4. Initialize GA / 4. 初始化遗传算法
+    // 4. Initialize GA
     let mut ga = GeneticAlgorithm::new(args.pop, targets, seed_genome);
 
     println!("Starting evolution for {} generations...", args.gens);
 
-    // 5. Evolution Loop / 5. 进化循环
+    // 5. Evolution Loop
     for i in 0..args.gens {
         ga.evolve();
 
@@ -153,11 +131,9 @@ fn main() -> Result<()> {
                 "Gen {}: Loss = {:.5} (Sim: {:.2}%)",
                 i, best.loss, current_sim
             );
-            // Periodic save / 定期保存
-            save_patch(&best.genome, &args.out)?;
+            save_checkpoint(&args, i, best.loss, &best.genome)?;
         }
 
-        // Check stopping condition / 检查停止条件
         if let Some(thresh) = stop_loss {
             if best.loss <= thresh {
                 println!("\nTarget similarity reached!");
@@ -165,7 +141,7 @@ fn main() -> Result<()> {
                     "Gen {}: Loss = {:.5} (Sim: {:.2}%)",
                     i, best.loss, current_sim
                 );
-                save_patch(&best.genome, &args.out)?;
+                save_checkpoint(&args, i, best.loss, &best.genome)?;
                 break;
             }
         }
@@ -177,9 +153,48 @@ fn main() -> Result<()> {
         best.loss,
         100.0 / (1.0 + best.loss)
     );
-    save_patch(&best.genome, &args.out)?;
-    println!("Saved best patch to {:?}", args.out);
+    save_checkpoint(&args, args.gens, best.loss, &best.genome)?;
 
+    // Save as "latest.json" for convenience
+    let latest_path = args.out_dir.join("latest.json");
+    save_patch(&best.genome, &latest_path)?;
+    println!("Saved latest patch to {:?}", latest_path);
+
+    Ok(())
+}
+
+fn save_checkpoint(args: &Args, generation: usize, loss: f32, genome: &PatchGenome) -> Result<()> {
+    let filename = format!("gen_{:04}_loss_{:.4}", generation, loss);
+
+    // Save JSON
+    let json_path = args.out_dir.join(format!("{}.json", filename));
+    save_patch(genome, &json_path)?;
+
+    // Save WAV
+    let wav_path = args.out_dir.join(format!("{}.wav", filename));
+    save_wav(genome, args.note, &wav_path)?;
+
+    Ok(())
+}
+
+fn save_wav(genome: &PatchGenome, note: f32, path: &PathBuf) -> Result<()> {
+    let duration = 2.0; // Standard duration
+    let samples = render_sample(genome, note, duration);
+
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 44100,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+
+    let mut writer = hound::WavWriter::create(path, spec)?;
+    let amplitude = i16::MAX as f32;
+
+    for sample in samples {
+        writer.write_sample((sample.clamp(-1.0, 1.0) * amplitude) as i16)?;
+    }
+    writer.finalize()?;
     Ok(())
 }
 
