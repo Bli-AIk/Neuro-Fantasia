@@ -25,11 +25,18 @@ In the future, it may also support direct export to game engines like Bevy or VS
 
 * **Genetic Evolution**: Uses Tournament Selection, Crossover, and Mutation to find the best parameters.
 * **Advanced Subtractive Engine**:
-    * **Dynamic Transient Layer**: Precisely sculpted noise envelope (Attack/Decay) to simulate realistic instrument attacks (e.g., breath, bow scratch).
-    * **Exponential ADSR**: Curve-controlled envelopes for natural, non-linear decay and release, vital for brass and acoustic emulation.
-    * **Enhanced Modulation**: LFOs now feature Delay and Fade-in parameters to simulate delayed vibrato and gradual timbre evolution.
-    * **Non-linear Filter Chain**: Includes Pre-Filter Saturation to add warmth and harmonics before filtering, plus Post-Filter Drive.
-    * **Dual LFOs**: Dedicated LFOs for Vibrato (Pitch) and Wah/PWM (Filter).
+    * **Wavetable Morphing**: Scans through sorted wavetables to mimic Pulse Width Modulation (PWM) and dynamic timbre
+      evolution.
+    * **Frequency Modulation (FM)**: Linear FM (Osc1 -> Osc2) allows creating metallic textures and complex harmonics.
+    * **Dynamic Transient Layer**: Precisely sculpted noise envelope (Attack/Decay) to simulate realistic instrument
+      attacks (e.g., breath, bow scratch).
+    * **Exponential ADSR**: Curve-controlled envelopes for natural, non-linear decay and release, vital for brass and
+      acoustic emulation.
+    * **Enhanced Modulation**: LFOs now feature Delay and Fade-in parameters to simulate delayed vibrato and gradual
+      timbre evolution.
+    * **Non-linear Filter Chain**: Includes Pre-Filter Saturation to add warmth and harmonics before filtering, plus
+      Post-Filter Drive.
+    * **Dual LFOs**: Dedicated LFOs for Vibrato (Pitch) and Wah/PWM (Filter/Morph).
     * **FX Engine**: Built-in Stereo Chorus and Reverb to add depth and space to the sound.
     * **Sorted Wavetables**: Automatically sorts thousands of waveforms by brightness for smoother evolution.
 * **Multi-Target Training**: Train on multiple pitches of the same instrument for higher accuracy.
@@ -104,7 +111,8 @@ In the future, it may also support direct export to game engines like Bevy or VS
      --resume output/latest.json
    ```
 
-   *The trainer will automatically save `gen_XXXX_loss_YYYY.json` and `gen_XXXX_loss_YYYY.wav` files in the output directory.*
+   *The trainer will automatically save `gen_XXXX_loss_YYYY.json` and `gen_XXXX_loss_YYYY.wav` files in the output
+   directory.*
 
 ## How to Build
 
@@ -142,18 +150,18 @@ This project uses the following key crates:
 This project includes or utilizes the following audio resources:
 
 * **Adventure Kid Waveforms (AKWF)** by Kristoffer Ekstrand.
-  * Public Domain / CC0.
-  * Source: [https://www.adventurekid.se/akrt/waveforms/](https://www.adventurekid.se/akrt/waveforms/)
+    * Public Domain / CC0.
+    * Source: [https://www.adventurekid.se/akrt/waveforms/](https://www.adventurekid.se/akrt/waveforms/)
 
 * **Virtual Playing Orchestra 3** by Paul Battersby.
-  * Used for extracting single-cycle waveforms for training.
-  * Source: [http://virtualplaying.com](http://virtualplaying.com)
-  * Incorporates samples from:
-    * **Sonatina Symphonic Orchestra** (Creative Commons Sampling Plus 1.0)
-    * **No Budget Orchestra** (CC BY-SA 4.0)
-    * **VSCO 2 Community Edition** (CC0 1.0)
-    * **University of Iowa Electronic Music Studios**
-    * **Philharmonia Orchestra** (CC BY-SA 3.0)
+    * Used for extracting single-cycle waveforms for training.
+    * Source: [http://virtualplaying.com](http://virtualplaying.com)
+    * Incorporates samples from:
+        * **Sonatina Symphonic Orchestra** (Creative Commons Sampling Plus 1.0)
+        * **No Budget Orchestra** (CC BY-SA 4.0)
+        * **VSCO 2 Community Edition** (CC0 1.0)
+        * **University of Iowa Electronic Music Studios**
+        * **Philharmonia Orchestra** (CC BY-SA 3.0)
 
 ## Contributing
 

@@ -6,7 +6,6 @@
 use crate::resources::WAVETABLES;
 use fundsp::hacker32::*;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
 // --- Patch Genome ---
 
@@ -16,13 +15,18 @@ use std::sync::Arc;
 #[serde(default)]
 pub struct PatchGenome {
     // --- Oscillators / 振荡器 ---
-    pub osc1_idx: f32,
+    pub osc1_idx: f32, // Base wavetable position (0.0-1.0)
     pub osc2_idx: f32,
     pub detune: f32,
     pub osc_mix: f32,
     pub noise_mix: f32,
     pub noise_attack: f32,
     pub noise_decay: f32,
+
+    // --- FM & Morph / 调频与变形 (New) ---
+    pub fm_amount: f32,         // Osc1 modulates Osc2 freq (Linear FM)
+    pub osc_morph_env_amt: f32, // Filter Env modulates Wavetable Position
+    pub osc_morph_lfo_amt: f32, // LFOs modulate Wavetable Position
 
     // --- Amp Envelope / 音量包络 (ADSR) ---
     pub amp_attack: f32,
@@ -55,9 +59,9 @@ pub struct PatchGenome {
     pub lfo2_fade: f32,
 
     // --- FX & Output / 效果与输出 ---
-    pub drive: f32,      // Post-filter drive (existing)
-    pub saturation: f32, // Pre-filter saturation (new)
-    pub env_curve: f32,  // Envelope curvature (0.0 linear -> large exponential)
+    pub drive: f32,      // Post-filter drive
+    pub saturation: f32, // Pre-filter saturation
+    pub env_curve: f32,  // Envelope curvature
     pub chorus_mix: f32,
     pub reverb_mix: f32,
     pub master_vol: f32,
@@ -73,6 +77,10 @@ impl Default for PatchGenome {
             noise_mix: 0.0,
             noise_attack: 0.005,
             noise_decay: 0.1,
+
+            fm_amount: 0.0,
+            osc_morph_env_amt: 0.0,
+            osc_morph_lfo_amt: 0.0,
 
             amp_attack: 0.01,
             amp_decay: 0.1,
@@ -101,7 +109,7 @@ impl Default for PatchGenome {
 
             drive: 0.0,
             saturation: 0.0,
-            env_curve: 2.0, // Default to quadratic (natural)
+            env_curve: 2.0,
             chorus_mix: 0.0,
             reverb_mix: 0.0,
             master_vol: 0.8,
@@ -109,30 +117,30 @@ impl Default for PatchGenome {
     }
 }
 
-// --- Wavetable Oscillator ---
+// --- Morphing Wavetable Oscillator ---
 
-/// A custom oscillator that reads from a shared Wavetable.
-/// 从共享波表读取的自定义振荡器。
+/// An oscillator that can morph through the global wavetable bank.
+/// Inputs: [Frequency (Hz), Morph Position (0.0-1.0)]
+/// 一个可以在全局波表库中变形的振荡器。
+/// 输入：[频率 (Hz), 变形位置 (0.0-1.0)]
 #[derive(Clone)]
-pub struct WavetableOsc {
-    table: Arc<Vec<f32>>,
+pub struct MorphingWavetableOsc {
     phase: f32,
     sample_rate: f32,
 }
 
-impl WavetableOsc {
-    pub fn new(table: Arc<Vec<f32>>) -> Self {
+impl MorphingWavetableOsc {
+    pub fn new() -> Self {
         Self {
-            table,
             phase: 0.0,
             sample_rate: 44100.0,
         }
     }
 }
 
-impl AudioNode for WavetableOsc {
-    const ID: u64 = 0x57_54_4F_53; // "WTOS"
-    type Inputs = U1;
+impl AudioNode for MorphingWavetableOsc {
+    const ID: u64 = 0x4D_57_54_4F; // "MWTO"
+    type Inputs = U2; // Freq, Morph
     type Outputs = U1;
 
     fn reset(&mut self) {
@@ -146,103 +154,86 @@ impl AudioNode for WavetableOsc {
     #[inline]
     fn tick(&mut self, input: &Frame<f32, Self::Inputs>) -> Frame<f32, Self::Outputs> {
         let freq = input[0];
+        // Ensure morph is in 0.0-1.0 range (wrap or clamp?)
+        // Clamp is safer for "scanning", Wrap is better for "continuous".
+        // Let's use Clamp to avoid jumping from last to first (which might be very different).
+        let morph = input[1].clamp(0.0, 0.9999);
+
         let delta = freq / self.sample_rate;
         self.phase += delta;
-        self.phase -= self.phase.floor(); // Wrap phase to [0.0, 1.0)
+        self.phase -= self.phase.floor();
 
-        let len = self.table.len();
-        let pos = self.phase * len as f32;
-        let idx = pos as usize;
-        let frac = pos - idx as f32;
+        // Access Global Bank
+        if let Some(bank) = WAVETABLES.get() {
+            let bank_len = bank.len();
+            if bank_len == 0 {
+                return Frame::from([0.0]);
+            }
 
-        // Linear Interpolation
-        let s0 = self.table[idx % len];
-        let s1 = self.table[(idx + 1) % len];
-        let val = s0 + (s1 - s0) * frac;
+            // Calculate position in bank
+            let table_pos = morph * bank_len as f32;
+            let table_idx = table_pos as usize; // Integer part
+            let table_frac = table_pos - table_idx as f32; // Fractional part for morphing
 
-        Frame::from([val])
+            // Safety check
+            let idx_a = table_idx % bank_len;
+            let idx_b = (table_idx + 1) % bank_len;
+
+            let table_a = &bank.tables[idx_a];
+            let table_b = &bank.tables[idx_b];
+
+            // Sample within the tables
+            let table_len = table_a.len();
+            let phase_pos = self.phase * table_len as f32;
+            let sample_idx = phase_pos as usize;
+            let sample_frac = phase_pos - sample_idx as f32;
+
+            // Interpolate Table A
+            let a0 = table_a[sample_idx % table_len];
+            let a1 = table_a[(sample_idx + 1) % table_len];
+            let val_a = a0 + (a1 - a0) * sample_frac;
+
+            // Interpolate Table B
+            let b0 = table_b[sample_idx % table_len];
+            let b1 = table_b[(sample_idx + 1) % table_len];
+            let val_b = b0 + (b1 - b0) * sample_frac;
+
+            // Morph between Table A and B
+            let final_val = val_a + (val_b - val_a) * table_frac;
+
+            Frame::from([final_val])
+        } else {
+            Frame::from([0.0])
+        }
     }
 }
 
 // --- Synthesizer Engine / 合成引擎 ---
 
 /// Creates a playable DSP graph from the genome.
-/// 根据基因组创建一个可播放的 DSP 图。
 pub fn create_graph(genome: &PatchGenome, midi_note: f32, duration: f64) -> Box<dyn AudioUnit> {
     let hz = midi_to_hz(midi_note);
 
-    // Ensure wavetables are loaded.
-    let bank = WAVETABLES.get().expect("Wavetables not initialized");
-
-    // Select tables based on genome
-    let table1_idx = (genome.osc1_idx * bank.len() as f32).floor() as usize;
-    let table2_idx = (genome.osc2_idx * bank.len() as f32).floor() as usize;
-    let table1 = bank.get(table1_idx);
-    let table2 = bank.get(table2_idx);
+    // Ensure wavetables are loaded (init if mostly for tests, but main loads it)
+    if WAVETABLES.get().is_none() {
+        // Fallback for tests if needed, though main handles it.
+    }
 
     // --- LFO Section ---
-    // LFO Fade envelopes
     let lfo1_env = lfo_fade(genome.lfo1_delay, genome.lfo1_fade);
     let lfo2_env = lfo_fade(genome.lfo2_delay, genome.lfo2_fade);
 
-    // LFO1: Filter / Timbre Modulation
+    // LFO1: Filter / Morph
     let lfo1 = sine_hz(genome.lfo1_rate) * lfo1_env;
-    let cutoff_mod = lfo1 * genome.lfo1_amt_cutoff;
+    let cutoff_mod = lfo1.clone() * genome.lfo1_amt_cutoff;
+    let lfo1_morph_mod = lfo1 * genome.osc_morph_lfo_amt;
 
-    // LFO2: Pitch / Vibrato
+    // LFO2: Pitch / Morph
     let lfo2 = sine_hz(genome.lfo2_rate) * lfo2_env;
-    let pitch_mod = lfo2 * genome.lfo2_amt_pitch;
-
-    // --- Oscillators ---
-    let osc1_node = An(WavetableOsc::new(table1));
-    let osc2_node = An(WavetableOsc::new(table2));
-
-    let freq1 = dc(hz) + pitch_mod.clone();
-    let osc1 = freq1 >> osc1_node;
-
-    let detune_hz = hz * (genome.detune * 0.02);
-    let freq2 = dc(hz + detune_hz) + pitch_mod;
-    let osc2 = freq2 >> osc2_node;
-
-    // --- Mixer ---
-    let osc_blended = (osc1 * (1.0 - genome.osc_mix)) + (osc2 * genome.osc_mix);
-
-    // Noise (Attack transient) - Noise uses linear ADSR usually, but curved is fine too.
-    let noise_env = adsr_curved(
-        genome.noise_attack,
-        genome.noise_decay,
-        0.0,
-        0.0,
-        0.0,
-        1.0, // Linear noise envelope usually works well for simple transients
-    );
-    let noise_src = (pink() * noise_env) * genome.noise_mix;
-
-    // Pre-Filter Mix
-    let raw_src = (osc_blended * (1.0 - genome.noise_mix)) + noise_src;
-
-    // --- Pre-Filter Saturation ---
-    // Simulating analog gain staging or VCA before filter.
-    // Soft clip if saturation > 0
-    let sat_amount = genome.saturation * 5.0; // Scale 0-1 to reasonable drive
-
-    // We apply saturation unconditionally to avoid type mismatch in conditional branches.
-    // When sat_amount is 0, the effect is negligible (linear).
-    // U1 -> U1
-    let drive_node = map(move |f: &Frame<f32, U1>| {
-        let x = f[0] * (1.0 + sat_amount);
-        // Soft clipping: tanh is standard for this
-        if sat_amount > 0.001 {
-            x.tanh()
-        } else {
-            x // Bypass if practically zero
-        }
-    });
-
-    let saturated_src = raw_src >> drive_node;
+    let pitch_mod = lfo2.clone() * genome.lfo2_amt_pitch;
+    let lfo2_morph_mod = lfo2 * genome.osc_morph_lfo_amt;
 
     // --- Envelopes ---
-    // Hold time is set to duration to simulate key press length
     let hold_time = duration as f32;
 
     let amp_env = adsr_curved(
@@ -262,6 +253,65 @@ pub fn create_graph(genome: &PatchGenome, midi_note: f32, duration: f64) -> Box<
         hold_time,
         genome.env_curve,
     );
+
+    // Envelope for Morphing (using Filter Env for now, common in synths)
+    let morph_env_mod = filter_env.clone() * genome.osc_morph_env_amt;
+
+    // --- Oscillators & FM ---
+
+    // Morph Modulation Logic:
+    // Base Index + LFO + Env
+    // We create control signals for morph inputs.
+    // LFO1 modulates Osc1 morph, LFO2 modulates Osc2 morph (arbitrary choice for variety)
+
+    // Osc 1 Morph Control
+    let osc1_base = dc(genome.osc1_idx);
+    let osc1_morph_ctrl = osc1_base + lfo1_morph_mod + morph_env_mod.clone();
+
+    // Osc 2 Morph Control
+    let osc2_base = dc(genome.osc2_idx);
+    let osc2_morph_ctrl = osc2_base + lfo2_morph_mod + morph_env_mod;
+
+    // Nodes
+    let osc1_node = An(MorphingWavetableOsc::new());
+    let osc2_node = An(MorphingWavetableOsc::new());
+
+    // Osc 1 Setup
+    let freq1 = dc(hz) + pitch_mod.clone();
+    let osc1_out = (freq1 | osc1_morph_ctrl) >> osc1_node;
+
+    // FM Logic: Osc1 Output -> Modulates Osc2 Freq
+    // FM Amount is ratio relative to base freq? Or raw Hz?
+    // Yamaha FM uses ratios. Linear FM adds (Modulator * Amt) to Carrier Freq.
+    // Let's use Linear FM: Freq2 = Base + Detune + Vibrato + (Osc1 * FM_Amt * Multiplier)
+    // To make FM effective, the amount often needs to scale with frequency or be large.
+    let fm_signal = osc1_out.clone() * (genome.fm_amount * 1000.0); // Scale up for audible effect
+
+    // Osc 2 Setup
+    let detune_hz = hz * (genome.detune * 0.02);
+    let freq2_base = dc(hz + detune_hz) + pitch_mod;
+    let freq2_final = freq2_base + fm_signal; // Add FM
+
+    let osc2_out = (freq2_final | osc2_morph_ctrl) >> osc2_node;
+
+    // --- Mixer ---
+    let osc_blended = (osc1_out * (1.0 - genome.osc_mix)) + (osc2_out * genome.osc_mix);
+
+    // Noise (Attack transient)
+    let noise_env = adsr_curved(genome.noise_attack, genome.noise_decay, 0.0, 0.0, 0.0, 1.0);
+    let noise_src = (pink() * noise_env) * genome.noise_mix;
+
+    // Pre-Filter Mix
+    let raw_src = (osc_blended * (1.0 - genome.noise_mix)) + noise_src;
+
+    // --- Pre-Filter Saturation ---
+    let sat_amount = genome.saturation * 5.0;
+    let drive_node = map(move |f: &Frame<f32, U1>| {
+        let x = f[0] * (1.0 + sat_amount);
+        if sat_amount > 0.001 { x.tanh() } else { x }
+    });
+
+    let saturated_src = raw_src >> drive_node;
 
     // --- Filter Modulation ---
     let env_mod = filter_env * genome.filter_env_amt;
@@ -360,9 +410,6 @@ pub fn render_sample(genome: &PatchGenome, note: f32, duration: f64) -> Vec<f32>
 }
 
 /// Helper: ADSR with Curve control.
-/// curve = 1.0 (linear).
-/// curve > 1.0: Attack becomes convex (punchy), Decay/Release become concave (natural analog).
-/// curve < 1.0: Opposite (slow attack, linear-ish decay).
 fn adsr_curved(
     a: f32,
     d: f32,
@@ -375,7 +422,6 @@ fn adsr_curved(
         let t = t as f32;
         if t < a {
             // Attack: 0 -> 1
-            // Use inverse curve for "convex" (charging capacitor) feel if curve > 1
             let phase = t / a;
             if curve > 1.0 {
                 phase.powf(1.0 / curve)
@@ -385,7 +431,6 @@ fn adsr_curved(
         } else if t < a + d {
             // Decay: 1 -> s
             let phase = (t - a) / d; // 0 -> 1
-            // Concave decay
             let val = 1.0 - phase;
             let curved_val = val.powf(curve);
             s + (1.0 - s) * curved_val

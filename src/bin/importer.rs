@@ -56,11 +56,15 @@ fn process_file(path: &Path, input_root: &Path, output_root: &Path) -> Result<()
         hound::SampleFormat::Float => reader.samples::<f32>().collect::<Result<Vec<_>, _>>()?,
         hound::SampleFormat::Int => {
             let max_val = 2u32.pow(spec.bits_per_sample as u32 - 1) as f32;
-            reader.samples::<i32>().map(|s| s.map(|v| v as f32 / max_val)).collect::<Result<Vec<_>, _>>()?
+            reader
+                .samples::<i32>()
+                .map(|s| s.map(|v| v as f32 / max_val))
+                .collect::<Result<Vec<_>, _>>()?
         }
     };
 
-    if samples.len() < 44100 / 20 { // Ignore very short files (< 50ms)
+    if samples.len() < 44100 / 20 {
+        // Ignore very short files (< 50ms)
         return Ok(());
     }
 
@@ -91,21 +95,21 @@ fn process_file(path: &Path, input_root: &Path, output_root: &Path) -> Result<()
         // Find the zero crossing near the start of the window to align phase roughly
         let mut best_start = 0;
         for i in 0..period_len.min(analysis_window.len() - 1) {
-            if analysis_window[i] <= 0.0 && analysis_window[i+1] > 0.0 {
+            if analysis_window[i] <= 0.0 && analysis_window[i + 1] > 0.0 {
                 best_start = i;
                 break;
             }
         }
-        
+
         // Exact extraction with linear interpolation for fractional period is too complex for this quick script.
         // We will just take the floor(period_len) samples and resample.
         // Better: Try to find a window of size `period_len` that minimizes start/end discontinuity.
-        
+
         let cycle_len = period_len;
         if best_start + cycle_len >= analysis_window.len() {
-             return Ok(());
+            return Ok(());
         }
-        
+
         let source_cycle = &analysis_window[best_start..best_start + cycle_len];
 
         // 6. Resample to TABLE_SIZE (2048)
@@ -115,13 +119,13 @@ fn process_file(path: &Path, input_root: &Path, output_root: &Path) -> Result<()
             let pos = phase * (cycle_len as f32);
             let idx = pos as usize;
             let frac = pos - idx as f32;
-            
+
             let s0 = source_cycle[idx % cycle_len];
             let s1 = source_cycle[(idx + 1) % cycle_len]; // Wrap logic
             let val = s0 + (s1 - s0) * frac;
             table.push(val);
         }
-        
+
         // 7. Normalize
         let max_val = table.iter().fold(0.0f32, |a, &b| a.max(b.abs()));
         if max_val > 0.0 {
@@ -134,7 +138,7 @@ fn process_file(path: &Path, input_root: &Path, output_root: &Path) -> Result<()
         if let Some(parent) = out_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        
+
         let spec = hound::WavSpec {
             channels: 1,
             sample_rate: 44100,
@@ -146,7 +150,7 @@ fn process_file(path: &Path, input_root: &Path, output_root: &Path) -> Result<()
             writer.write_sample((s * i16::MAX as f32) as i16)?;
         }
         writer.finalize()?;
-        
+
         // println!("Processed: {:?}", rel_path);
     }
 
@@ -166,7 +170,7 @@ fn detect_period_autocorr(audio: &[f32], sample_rate: u32) -> Option<usize> {
     let mut max_corr = 0.0;
 
     // Simple Autocorrelation
-    // Optimization: Don't check every single lag, or use FFT for speed. 
+    // Optimization: Don't check every single lag, or use FFT for speed.
     // Given we are offline processing, brute force is acceptable for a few thousand samples.
     // We only check lags in the valid range.
 
@@ -175,7 +179,7 @@ fn detect_period_autocorr(audio: &[f32], sample_rate: u32) -> Option<usize> {
         let mut count = 0;
         // Compare audio[i] with audio[i + lag]
         // Use a subset of points to speed up
-        for i in (0..audio.len() - lag).step_by(4) { 
+        for i in (0..audio.len() - lag).step_by(4) {
             sum += audio[i] * audio[i + lag];
             count += 1;
         }
@@ -189,9 +193,10 @@ fn detect_period_autocorr(audio: &[f32], sample_rate: u32) -> Option<usize> {
 
     // Threshold check: signal must have some periodicity
     // RMS of the signal
-    let rms = (audio.iter().take(1000).map(|x| x*x).sum::<f32>() / 1000.0).sqrt();
-    if max_corr < rms * rms * 0.5 { // Arbitrary threshold
-         return None;
+    let rms = (audio.iter().take(1000).map(|x| x * x).sum::<f32>() / 1000.0).sqrt();
+    if max_corr < rms * rms * 0.5 {
+        // Arbitrary threshold
+        return None;
     }
 
     if best_period > 0 {

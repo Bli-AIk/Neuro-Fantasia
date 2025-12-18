@@ -152,6 +152,11 @@ fn random_genome(rng: &mut ThreadRng) -> PatchGenome {
         noise_attack: rng.gen_range(0.001..0.5),
         noise_decay: rng.gen_range(0.001..0.5),
 
+        // FM & Morph
+        fm_amount: rng.r#gen(), // 0.0-1.0 (Internal scaler handles range)
+        osc_morph_env_amt: rng.gen_range(-1.0..1.0),
+        osc_morph_lfo_amt: rng.r#gen(),
+
         // Amp Env
         amp_attack: rng.gen_range(0.001..2.0),
         amp_decay: rng.gen_range(0.001..2.0),
@@ -214,6 +219,13 @@ fn crossover(g1: &PatchGenome, g2: &PatchGenome, rng: &mut ThreadRng) -> PatchGe
     if rng.gen_bool(0.5) {
         child.noise_attack = g2.noise_attack;
         child.noise_decay = g2.noise_decay;
+    }
+
+    // Block swap for FM & Morph
+    if rng.gen_bool(0.5) {
+        child.fm_amount = g2.fm_amount;
+        child.osc_morph_env_amt = g2.osc_morph_env_amt;
+        child.osc_morph_lfo_amt = g2.osc_morph_lfo_amt;
     }
 
     // Block swap for Amp ADSR
@@ -296,6 +308,11 @@ fn mutate(g: &mut PatchGenome, rng: &mut ThreadRng) {
     apply(&mut g.noise_mix, 0.0, 1.0);
     apply(&mut g.noise_attack, 0.001, 0.5);
     apply(&mut g.noise_decay, 0.001, 0.5);
+
+    // FM & Morph
+    apply(&mut g.fm_amount, 0.0, 1.0);
+    apply(&mut g.osc_morph_env_amt, -1.0, 1.0);
+    apply(&mut g.osc_morph_lfo_amt, 0.0, 1.0);
 
     // Amp
     apply(&mut g.amp_attack, 0.001, 2.0);

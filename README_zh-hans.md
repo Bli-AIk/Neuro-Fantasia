@@ -7,9 +7,9 @@
 
 **Neuro-Fantasia** — 基于遗传算法的合成器音色逆向工程工具。
 
-| English | Simplified Chinese |
-|-----------------|
-| [English](./README.md) | 简体中文 |
+| English                | Simplified Chinese |
+|------------------------|--------------------|
+| [English](./README.md) | 简体中文               |
 
 ## 简介
 
@@ -23,11 +23,13 @@
 
 * **遗传进化**: 使用锦标赛选择、交叉和变异来寻找最佳参数。
 * **高级减法合成引擎**:
+    * **波表变形 (Wavetable Morphing)**: 通过扫描排序后的波表来模拟 PWM 和音色演变。
+    * **频率调制 (FM)**: 线性 FM (Osc1 -> Osc2) 可用于制造金属音和复杂纹理。
     * **动态瞬态层 (Transient)**: 可精确塑形的噪音包络 (Attack/Decay)，用于模拟真实的乐器起音（如吹气声、擦弦声）。
     * **指数包络 (Exponential ADSR)**: 支持曲线调节的包络，用于生成自然、非线性的衰减和释放，这对铜管和声学乐器至关重要。
     * **增强的调制系统**: LFO 现在具备延迟 (Delay) 和淡入 (Fade-in) 参数，可模拟延迟颤音和渐变的音色演变。
     * **非线性滤波链路**: 引入前置滤波器饱和 (Pre-Filter Saturation) 以增加温暖感和谐波，以及后置过载。
-    * **双 LFO 系统**: 专用的 LFO 分别用于颤音 (Pitch) 和 哇音/PWM (Filter)。
+    * **双 LFO 系统**: 专用的 LFO 分别用于颤音 (Pitch) 和 哇音/PWM (Filter/Morph)。
     * **FX 效果引擎**: 内置立体声合唱 (Chorus) 和混响 (Reverb)，为声音增加厚度与空间感。
     * **智能波表排序**: 自动按亮度对数千个波形进行排序，使进化过程更加平滑。
 * **多目标训练**: 支持对同一乐器的多个音高进行训练，以提高准确性。
@@ -133,25 +135,25 @@
 | [rustfft](https://crates.io/crates/rustfft) | 用于频谱分析的 FFT |
 | [rayon](https://crates.io/crates/rayon)     | 并行计算适应度     |
 | [clap](https://crates.io/crates/clap)       | CLI 参数解析    |
-| [serde](https://crates.io/crates/serde)     | JSON 序列化支持              |
+| [serde](https://crates.io/crates/serde)     | JSON 序列化支持  |
 
 ## 致谢 (Credits)
 
 本项目包含或使用了以下音频资源：
 
 * **Adventure Kid Waveforms (AKWF)** - Kristoffer Ekstrand
-  * 公有领域 / CC0。
-  * 来源: [https://www.adventurekid.se/akrt/waveforms/](https://www.adventurekid.se/akrt/waveforms/)
+    * 公有领域 / CC0。
+    * 来源: [https://www.adventurekid.se/akrt/waveforms/](https://www.adventurekid.se/akrt/waveforms/)
 
 * **Virtual Playing Orchestra 3** - Paul Battersby
-  * 用于提取训练所需的单周期波形。
-  * 来源: [http://virtualplaying.com](http://virtualplaying.com)
-  * 包含了来自以下的采样：
-    * **Sonatina Symphonic Orchestra** (Creative Commons Sampling Plus 1.0)
-    * **No Budget Orchestra** (CC BY-SA 4.0)
-    * **VSCO 2 Community Edition** (CC0 1.0)
-    * **University of Iowa Electronic Music Studios**
-    * **Philharmonia Orchestra** (CC BY-SA 3.0)
+    * 用于提取训练所需的单周期波形。
+    * 来源: [http://virtualplaying.com](http://virtualplaying.com)
+    * 包含了来自以下的采样：
+        * **Sonatina Symphonic Orchestra** (Creative Commons Sampling Plus 1.0)
+        * **No Budget Orchestra** (CC BY-SA 4.0)
+        * **VSCO 2 Community Edition** (CC0 1.0)
+        * **University of Iowa Electronic Music Studios**
+        * **Philharmonia Orchestra** (CC BY-SA 3.0)
 
 ## 贡献 (Contributing)
 
