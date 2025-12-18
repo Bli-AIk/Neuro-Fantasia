@@ -25,8 +25,10 @@ In the future, it may also support direct export to game engines like Bevy or VS
 
 * **Genetic Evolution**: Uses Tournament Selection, Crossover, and Mutation to find the best parameters.
 * **Advanced Subtractive Engine**:
+    * **Dynamic Transient Layer**: Precisely sculpted noise envelope (Attack/Decay) to simulate realistic instrument attacks (e.g., breath, bow scratch).
     * **Dual Envelopes**: Independent ADSR for Amplitude and Filter (Timbre) control.
     * **Dual LFOs**: Dedicated LFOs for Vibrato (Pitch) and Wah/PWM (Filter).
+    * **FX Engine**: Built-in Stereo Chorus and Reverb to add depth and space to the sound.
     * **Sorted Wavetables**: Automatically sorts thousands of waveforms by brightness for smoother evolution.
 * **Multi-Target Training**: Train on multiple pitches of the same instrument for higher accuracy.
 * **Resume Capability**: Stop and resume training at any time.

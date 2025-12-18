@@ -149,6 +149,8 @@ fn random_genome(rng: &mut ThreadRng) -> PatchGenome {
         detune: rng.r#gen(),
         osc_mix: rng.r#gen(),
         noise_mix: rng.r#gen(),
+        noise_attack: rng.gen_range(0.001..0.5),
+        noise_decay: rng.gen_range(0.001..0.5),
 
         // Amp Env
         amp_attack: rng.gen_range(0.001..2.0),
@@ -201,6 +203,10 @@ fn crossover(g1: &PatchGenome, g2: &PatchGenome, rng: &mut ThreadRng) -> PatchGe
     }
     if rng.gen_bool(0.5) {
         child.noise_mix = g2.noise_mix;
+    }
+    if rng.gen_bool(0.5) {
+        child.noise_attack = g2.noise_attack;
+        child.noise_decay = g2.noise_decay;
     }
 
     // Block swap for Amp ADSR
@@ -271,6 +277,8 @@ fn mutate(g: &mut PatchGenome, rng: &mut ThreadRng) {
     apply(&mut g.detune, 0.0, 1.0);
     apply(&mut g.osc_mix, 0.0, 1.0);
     apply(&mut g.noise_mix, 0.0, 1.0);
+    apply(&mut g.noise_attack, 0.001, 0.5);
+    apply(&mut g.noise_decay, 0.001, 0.5);
 
     // Amp
     apply(&mut g.amp_attack, 0.001, 2.0);

@@ -4,6 +4,7 @@
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use indicatif::{ProgressBar, ProgressStyle};
 use neuro_fantasia::analysis::{AudioFeatures, extract_features};
 use neuro_fantasia::genetic::GeneticAlgorithm;
 use neuro_fantasia::resources::{WAVETABLES, WavetableBank};
@@ -137,19 +138,29 @@ fn main() -> Result<()> {
         args.gens, start_gen
     );
 
+    let bar = ProgressBar::new(args.save_interval as u64);
+    bar.set_style(
+        ProgressStyle::with_template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} steps")
+            .unwrap()
+            .progress_chars("=>-"),
+    );
+
     // 5. Evolution Loop
     for i in start_gen..(start_gen + args.gens) {
         ga.evolve();
+        bar.inc(1);
 
         let best = ga.best_individual();
         let current_sim = 100.0 / (1.0 + best.loss);
 
         if i % args.save_interval == 0 {
+            bar.finish_and_clear(); // Clear bar to print log without conflict
             println!(
                 "Gen {}: Loss = {:.5} (Sim: {:.2}%)",
                 i, best.loss, current_sim
             );
             save_checkpoint(&args, i, best.loss, &best.genome)?;
+            bar.reset(); // Reset bar for next interval
         }
 
         if let Some(thresh) = stop_loss {

@@ -20,6 +20,8 @@ pub struct PatchGenome {
     pub detune: f32,
     pub osc_mix: f32,
     pub noise_mix: f32,
+    pub noise_attack: f32,
+    pub noise_decay: f32,
 
     // --- Amp Envelope / 音量包络 (ADSR) ---
     pub amp_attack: f32,
@@ -62,6 +64,8 @@ impl Default for PatchGenome {
             detune: 0.0,
             osc_mix: 0.5,
             noise_mix: 0.0,
+            noise_attack: 0.005,
+            noise_decay: 0.1,
 
             amp_attack: 0.01,
             amp_decay: 0.1,
@@ -187,7 +191,7 @@ pub fn create_graph(genome: &PatchGenome, midi_note: f32, duration: f64) -> Box<
     let osc_blended = (osc1 * (1.0 - genome.osc_mix)) + (osc2 * genome.osc_mix);
 
     // Noise (Attack transient)
-    let noise_env = adsr_fixed(0.005, 0.1, 0.0, 0.0, 0.0);
+    let noise_env = adsr_fixed(genome.noise_attack, genome.noise_decay, 0.0, 0.0, 0.0);
     let noise_src = (pink() * noise_env) * genome.noise_mix;
 
     let src_mono = (osc_blended * (1.0 - genome.noise_mix)) + noise_src;
@@ -230,12 +234,11 @@ pub fn create_graph(genome: &PatchGenome, midi_note: f32, duration: f64) -> Box<
 
     // Fix lifetime: Copy fields needed by closure
     let g_drive = genome.drive;
-    let _g_reverb_mix = genome.reverb_mix; // Unused for now
+    let g_reverb_mix = genome.reverb_mix;
+    let g_chorus_mix = genome.chorus_mix;
     let g_master_vol = genome.master_vol;
 
     // --- Filter Branching & Final Chain ---
-    // We simplify to Mono output to guarantee type safety.
-    // Stereo/Reverb features are temporarily disabled until type inference issues are resolved.
     let make_full_graph = move |mode: i32| -> Box<dyn AudioUnit> {
         let c = clamped_cutoff.clone();
         let q_val = q.clone();
@@ -244,23 +247,42 @@ pub fn create_graph(genome: &PatchGenome, midi_note: f32, duration: f64) -> Box<
         let drive_amt = 1.0 + g_drive * 5.0;
 
         // U1 -> U1
-        // Explicitly typed Identity node to enforce U1 input
         let input_forced = map(|f: &Frame<f32, U1>| f.clone());
-
         let drive = (input_forced * drive_amt) >> map(|f: &Frame<f32, U1>| f[0].tanh());
 
         // Force amp_env to be treated as U1
         let amp_forced = amp_env.clone() >> map(|f: &Frame<f32, U1>| f.clone());
 
         // U1
-        let mono = (drive * amp_forced) * g_master_vol;
+        let mono_out = (drive * amp_forced) * g_master_vol;
+
+        // FX Chain Construction
+        // Chorus (Mono -> Stereo)
+        let chorus_l = chorus(0, 0.015, 0.2, 0.5);
+        let chorus_r = chorus(1, 0.015, 0.2, 0.55);
+        let chorus_stereo = chorus_l | chorus_r; // U2 -> U2 (stacks inputs and outputs)
+
+        // Path: Split -> Chorus -> Mix
+        let chorus_path = split() >> chorus_stereo;
+        let dry_path = split();
+
+        // Chorus Mix
+        let mixed_chorus = (dry_path * (1.0 - g_chorus_mix)) & (chorus_path * g_chorus_mix);
+
+        // Reverb (Stereo -> Stereo)
+        let reverb_op = reverb_stereo(10.0, 2.0, 0.5);
+        let dry_reverb = multipass::<U2>();
+
+        // Reverb Mix
+        let final_fx =
+            mixed_chorus >> ((dry_reverb * (1.0 - g_reverb_mix)) & (reverb_op * g_reverb_mix));
 
         if mode == 0 {
-            Box::new((src | c | q_val) >> lowpass() >> mono)
+            Box::new((src | c | q_val) >> lowpass() >> mono_out >> final_fx)
         } else if mode == 1 {
-            Box::new((src | c | q_val) >> highpass() >> mono)
+            Box::new((src | c | q_val) >> highpass() >> mono_out >> final_fx)
         } else {
-            Box::new((src | c | q_val) >> bandpass() >> mono)
+            Box::new((src | c | q_val) >> bandpass() >> mono_out >> final_fx)
         }
     };
 
