@@ -2,15 +2,6 @@
 //!
 //! This module implements the evolutionary logic to search for the best synthesizer patch that matches the target sound.
 //! 此模块实现了进化逻辑，以搜索与目标声音最匹配的合成器音色。
-//!
-//! ## Components / 组件
-//! - **Individual**: A candidate solution containing a `PatchGenome` and its calculated fitness (loss). / **个体**: 包含 `PatchGenome` 及其计算适应度（损失）的候选解。
-//! - **GeneticAlgorithm**: Manages the population and evolution cycle. / **遗传算法**: 管理种群和进化周期。
-//!
-//! ## Operators / 算子
-//! - **Selection**: Tournament Selection (picks best of random subset). / **选择**: 锦标赛选择（选取随机子集中的最佳者）。
-//! - **Crossover**: Uniform Crossover (mixes parameters from two parents). / **交叉**: 均匀交叉（混合来自两个父代的参数）。
-//! - **Mutation**: Gaussian Mutation (adds random noise to parameters). / **变异**: 高斯变异（向参数添加随机噪声）。
 
 use crate::analysis::{AudioFeatures, calculate_loss, extract_features};
 use crate::synth::{PatchGenome, render_sample};
@@ -42,47 +33,75 @@ impl Individual {
 /// 主遗传算法控制器。
 pub struct GeneticAlgorithm {
     population: Vec<Individual>,
-    target_features: AudioFeatures,
-    note_freq: f32, // Midi note / MIDI 音符
+    /// List of targets: (Midi Note, Extracted Features)
+    /// 目标列表：(MIDI 音符, 提取的特征)
+    targets: Vec<(f32, AudioFeatures)>,
     pub generation: usize,
 }
 
 impl GeneticAlgorithm {
-    /// Initializes a new random population.
-    /// 初始化一个新的随机种群。
-    pub fn new(pop_size: usize, target_features: AudioFeatures, note_freq: f32) -> Self {
+    /// Initializes a new population.
+    /// 初始化一个新种群。
+    ///
+    /// - `seed`: Optional genome to start from (Resume training). / 可选的起始基因组（恢复训练）。
+    pub fn new(
+        pop_size: usize,
+        targets: Vec<(f32, AudioFeatures)>,
+        seed: Option<PatchGenome>,
+    ) -> Self {
         let mut rng = thread_rng();
-        let population: Vec<Individual> = (0..pop_size)
-            .map(|_| Individual::new(random_genome(&mut rng)))
-            .collect();
+        let mut population = Vec::with_capacity(pop_size);
+
+        if let Some(seed_genome) = seed {
+            // Seeding strategy:
+            // 1. Keep the seed itself (Elitism at start). / 保留种子本身（初始精英）。
+            population.push(Individual::new(seed_genome));
+
+            // 2. Generate 30% mutated variants of the seed. / 生成 30% 种子的变异体。
+            let mutants_count = pop_size / 3;
+            for _ in 0..mutants_count {
+                let mut variant = seed_genome;
+                mutate(&mut variant, &mut rng);
+                population.push(Individual::new(variant));
+            }
+        }
+
+        // Fill the rest with random genomes.
+        // 用随机基因组填充剩余部分。
+        while population.len() < pop_size {
+            population.push(Individual::new(random_genome(&mut rng)));
+        }
 
         Self {
             population,
-            target_features,
-            note_freq,
+            targets,
             generation: 0,
         }
     }
 
     /// Advances the population by one generation.
     /// 将种群推进一代。
-    ///
-    /// Steps:
-    /// 步骤：
-    /// 1. **Evaluation**: Render audio and calculate loss for all individuals (Parallelized). / **评估**: 渲染音频并计算所有个体的损失（并行化）。
-    /// 2. **Selection**: Sort by loss and keep elites. / **选择**: 按损失排序并保留精英。
-    /// 3. **Breeding**: Create new offspring via Crossover and Mutation. / **繁殖**: 通过交叉和变异创造新后代。
     pub fn evolve(&mut self) {
         // 1. Evaluate Fitness (Parallel)
         // 1. 评估适应度（并行）
-        let note = self.note_freq;
-        let target = &self.target_features;
+        let targets = &self.targets;
 
         self.population.par_iter_mut().for_each(|ind| {
-            // Render candidate / 渲染候选者
-            let audio = render_sample(&ind.genome, note, 2.0); // 2 seconds render / 渲染 2 秒
-            let feats = extract_features(&audio, 44100);
-            ind.loss = calculate_loss(target, &feats);
+            let mut total_loss = 0.0;
+
+            // Sum loss across all target notes
+            // 累加所有目标音符的损失
+            for (note, target_feats) in targets {
+                // Render candidate for this specific note
+                // 为此特定音符渲染候选者
+                let audio = render_sample(&ind.genome, *note, 2.0);
+                let feats = extract_features(&audio, 44100);
+                total_loss += calculate_loss(target_feats, &feats);
+            }
+
+            // Average loss
+            // 平均损失
+            ind.loss = total_loss / targets.len() as f32;
         });
 
         // 2. Sort (Ascending Loss)
@@ -148,14 +167,10 @@ fn random_genome(rng: &mut ThreadRng) -> PatchGenome {
 
 /// Performs Uniform Crossover.
 /// 执行均匀交叉。
-///
-/// Each gene has a 50% chance of coming from either parent.
-/// 每个基因有 50% 的几率来自任一父代。
 fn crossover(g1: &PatchGenome, g2: &PatchGenome, rng: &mut ThreadRng) -> PatchGenome {
     let mut child = *g1;
 
     // Independent mixing for critical parameters
-    // 关键参数的独立混合
     if rng.gen_bool(0.5) {
         child.osc1_idx = g2.osc1_idx;
     }
@@ -172,8 +187,7 @@ fn crossover(g1: &PatchGenome, g2: &PatchGenome, rng: &mut ThreadRng) -> PatchGe
         child.noise_mix = g2.noise_mix;
     }
 
-    // Block swap for ADSR (often these params are related)
-    // ADSR 的块交换（通常这些参数是相关的）
+    // Block swap for ADSR
     if rng.gen_bool(0.5) {
         child.attack = g2.attack;
         child.decay = g2.decay;
@@ -182,7 +196,6 @@ fn crossover(g1: &PatchGenome, g2: &PatchGenome, rng: &mut ThreadRng) -> PatchGe
     }
 
     // Block swap for Filter
-    // 滤波器的块交换
     if rng.gen_bool(0.5) {
         child.cutoff = g2.cutoff;
         child.resonance = g2.resonance;
@@ -191,7 +204,6 @@ fn crossover(g1: &PatchGenome, g2: &PatchGenome, rng: &mut ThreadRng) -> PatchGe
     }
 
     // Block swap for LFO
-    // LFO 的块交换
     if rng.gen_bool(0.5) {
         child.lfo_rate = g2.lfo_rate;
         child.lfo_amt_pitch = g2.lfo_amt_pitch;
@@ -207,12 +219,9 @@ fn crossover(g1: &PatchGenome, g2: &PatchGenome, rng: &mut ThreadRng) -> PatchGe
 
 /// Applies Gaussian Mutation to genes.
 /// 将高斯变异应用于基因。
-///
-/// Small probability to nudge parameters by a small amount.
-/// 以小概率对参数进行微调。
 fn mutate(g: &mut PatchGenome, rng: &mut ThreadRng) {
-    let mut_prob = 0.1; // Mutation probability per gene / 每个基因的变异概率
-    let normal = Normal::new(0.0, 0.1).unwrap(); // Std dev 0.1 / 标准差 0.1
+    let mut_prob = 0.1;
+    let normal = Normal::new(0.0, 0.1).unwrap();
 
     let mut apply = |val: &mut f32, min: f32, max: f32| {
         if rng.gen_bool(mut_prob) {

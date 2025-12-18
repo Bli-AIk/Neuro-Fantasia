@@ -1,0 +1,13 @@
+{
+  "samples": [
+    { "filename": "G4.wav", "note": 67.0 },
+    { "filename": "A#4.wav", "note": 70.0 },
+    { "filename": "C5.wav", "note": 72.0 },
+    { "filename": "D#5.wav", "note": 75.0 },
+    { "filename": "F5.wav", "note": 77.0 },
+    { "filename": "G5.wav", "note": 79.0 },
+    { "filename": "D6.wav", "note": 86.0 },
+    { "filename": "A6.wav", "note": 93.0 },
+    { "filename": "D7.wav", "note": 98.0 }
+  ]
+}
