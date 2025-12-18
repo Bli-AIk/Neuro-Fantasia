@@ -26,7 +26,9 @@ In the future, it may also support direct export to game engines like Bevy or VS
 * **Genetic Evolution**: Uses Tournament Selection, Crossover, and Mutation to find the best parameters.
 * **Advanced Subtractive Engine**:
     * **Dynamic Transient Layer**: Precisely sculpted noise envelope (Attack/Decay) to simulate realistic instrument attacks (e.g., breath, bow scratch).
-    * **Dual Envelopes**: Independent ADSR for Amplitude and Filter (Timbre) control.
+    * **Exponential ADSR**: Curve-controlled envelopes for natural, non-linear decay and release, vital for brass and acoustic emulation.
+    * **Enhanced Modulation**: LFOs now feature Delay and Fade-in parameters to simulate delayed vibrato and gradual timbre evolution.
+    * **Non-linear Filter Chain**: Includes Pre-Filter Saturation to add warmth and harmonics before filtering, plus Post-Filter Drive.
     * **Dual LFOs**: Dedicated LFOs for Vibrato (Pitch) and Wah/PWM (Filter).
     * **FX Engine**: Built-in Stereo Chorus and Reverb to add depth and space to the sound.
     * **Sorted Wavetables**: Automatically sorts thousands of waveforms by brightness for smoother evolution.

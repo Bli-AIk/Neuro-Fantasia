@@ -13,6 +13,7 @@ use std::sync::Arc;
 /// Represents the genetic code of a synthesizer patch.
 /// 代表合成器音色的遗传代码。
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[serde(default)]
 pub struct PatchGenome {
     // --- Oscillators / 振荡器 ---
     pub osc1_idx: f32,
@@ -44,13 +45,19 @@ pub struct PatchGenome {
     // --- LFO 1 (Modulation/Filter/PWM) ---
     pub lfo1_rate: f32,
     pub lfo1_amt_cutoff: f32,
+    pub lfo1_delay: f32,
+    pub lfo1_fade: f32,
 
     // --- LFO 2 (Vibrato/Pitch) ---
     pub lfo2_rate: f32,
     pub lfo2_amt_pitch: f32,
+    pub lfo2_delay: f32,
+    pub lfo2_fade: f32,
 
     // --- FX & Output / 效果与输出 ---
-    pub drive: f32,
+    pub drive: f32,      // Post-filter drive (existing)
+    pub saturation: f32, // Pre-filter saturation (new)
+    pub env_curve: f32,  // Envelope curvature (0.0 linear -> large exponential)
     pub chorus_mix: f32,
     pub reverb_mix: f32,
     pub master_vol: f32,
@@ -84,11 +91,17 @@ impl Default for PatchGenome {
 
             lfo1_rate: 1.0,
             lfo1_amt_cutoff: 0.0,
+            lfo1_delay: 0.0,
+            lfo1_fade: 0.1,
 
             lfo2_rate: 5.0,
             lfo2_amt_pitch: 0.0,
+            lfo2_delay: 0.0,
+            lfo2_fade: 0.1,
 
             drive: 0.0,
+            saturation: 0.0,
+            env_curve: 2.0, // Default to quadratic (natural)
             chorus_mix: 0.0,
             reverb_mix: 0.0,
             master_vol: 0.8,
@@ -168,12 +181,16 @@ pub fn create_graph(genome: &PatchGenome, midi_note: f32, duration: f64) -> Box<
     let table2 = bank.get(table2_idx);
 
     // --- LFO Section ---
+    // LFO Fade envelopes
+    let lfo1_env = lfo_fade(genome.lfo1_delay, genome.lfo1_fade);
+    let lfo2_env = lfo_fade(genome.lfo2_delay, genome.lfo2_fade);
+
     // LFO1: Filter / Timbre Modulation
-    let lfo1 = sine_hz(genome.lfo1_rate);
+    let lfo1 = sine_hz(genome.lfo1_rate) * lfo1_env;
     let cutoff_mod = lfo1 * genome.lfo1_amt_cutoff;
 
     // LFO2: Pitch / Vibrato
-    let lfo2 = sine_hz(genome.lfo2_rate);
+    let lfo2 = sine_hz(genome.lfo2_rate) * lfo2_env;
     let pitch_mod = lfo2 * genome.lfo2_amt_pitch;
 
     // --- Oscillators ---
@@ -190,30 +207,60 @@ pub fn create_graph(genome: &PatchGenome, midi_note: f32, duration: f64) -> Box<
     // --- Mixer ---
     let osc_blended = (osc1 * (1.0 - genome.osc_mix)) + (osc2 * genome.osc_mix);
 
-    // Noise (Attack transient)
-    let noise_env = adsr_fixed(genome.noise_attack, genome.noise_decay, 0.0, 0.0, 0.0);
+    // Noise (Attack transient) - Noise uses linear ADSR usually, but curved is fine too.
+    let noise_env = adsr_curved(
+        genome.noise_attack,
+        genome.noise_decay,
+        0.0,
+        0.0,
+        0.0,
+        1.0, // Linear noise envelope usually works well for simple transients
+    );
     let noise_src = (pink() * noise_env) * genome.noise_mix;
 
-    let src_mono = (osc_blended * (1.0 - genome.noise_mix)) + noise_src;
+    // Pre-Filter Mix
+    let raw_src = (osc_blended * (1.0 - genome.noise_mix)) + noise_src;
+
+    // --- Pre-Filter Saturation ---
+    // Simulating analog gain staging or VCA before filter.
+    // Soft clip if saturation > 0
+    let sat_amount = genome.saturation * 5.0; // Scale 0-1 to reasonable drive
+
+    // We apply saturation unconditionally to avoid type mismatch in conditional branches.
+    // When sat_amount is 0, the effect is negligible (linear).
+    // U1 -> U1
+    let drive_node = map(move |f: &Frame<f32, U1>| {
+        let x = f[0] * (1.0 + sat_amount);
+        // Soft clipping: tanh is standard for this
+        if sat_amount > 0.001 {
+            x.tanh()
+        } else {
+            x // Bypass if practically zero
+        }
+    });
+
+    let saturated_src = raw_src >> drive_node;
 
     // --- Envelopes ---
     // Hold time is set to duration to simulate key press length
     let hold_time = duration as f32;
 
-    let amp_env = adsr_fixed(
+    let amp_env = adsr_curved(
         genome.amp_attack,
         genome.amp_decay,
         genome.amp_sustain,
         genome.amp_release,
         hold_time,
+        genome.env_curve,
     );
 
-    let filter_env = adsr_fixed(
+    let filter_env = adsr_curved(
         genome.filter_attack,
         genome.filter_decay,
         genome.filter_sustain,
         genome.filter_release,
         hold_time,
+        genome.env_curve,
     );
 
     // --- Filter Modulation ---
@@ -228,11 +275,7 @@ pub fn create_graph(genome: &PatchGenome, midi_note: f32, duration: f64) -> Box<
 
     let q = dc(genome.resonance * 10.0 + 0.1);
 
-    // --- Drive & Amp ---
-    // Move post-chain creation inside closure or use helper
-    // We used a helper `create_post_chain`.
-
-    // Fix lifetime: Copy fields needed by closure
+    // --- Post-Filter Drive & Amp ---
     let g_drive = genome.drive;
     let g_reverb_mix = genome.reverb_mix;
     let g_chorus_mix = genome.chorus_mix;
@@ -242,38 +285,33 @@ pub fn create_graph(genome: &PatchGenome, midi_note: f32, duration: f64) -> Box<
     let make_full_graph = move |mode: i32| -> Box<dyn AudioUnit> {
         let c = clamped_cutoff.clone();
         let q_val = q.clone();
-        let src = src_mono.clone();
+        let src = saturated_src.clone();
 
         let drive_amt = 1.0 + g_drive * 5.0;
 
-        // U1 -> U1
+        // Post-filter drive
         let input_forced = map(|f: &Frame<f32, U1>| f.clone());
         let drive = (input_forced * drive_amt) >> map(|f: &Frame<f32, U1>| f[0].tanh());
 
-        // Force amp_env to be treated as U1
+        // Amp
         let amp_forced = amp_env.clone() >> map(|f: &Frame<f32, U1>| f.clone());
-
-        // U1
         let mono_out = (drive * amp_forced) * g_master_vol;
 
         // FX Chain Construction
         // Chorus (Mono -> Stereo)
         let chorus_l = chorus(0, 0.015, 0.2, 0.5);
         let chorus_r = chorus(1, 0.015, 0.2, 0.55);
-        let chorus_stereo = chorus_l | chorus_r; // U2 -> U2 (stacks inputs and outputs)
+        let chorus_stereo = chorus_l | chorus_r;
 
-        // Path: Split -> Chorus -> Mix
         let chorus_path = split() >> chorus_stereo;
         let dry_path = split();
 
-        // Chorus Mix
         let mixed_chorus = (dry_path * (1.0 - g_chorus_mix)) & (chorus_path * g_chorus_mix);
 
         // Reverb (Stereo -> Stereo)
         let reverb_op = reverb_stereo(10.0, 2.0, 0.5);
         let dry_reverb = multipass::<U2>();
 
-        // Reverb Mix
         let final_fx =
             mixed_chorus >> ((dry_reverb * (1.0 - g_reverb_mix)) & (reverb_op * g_reverb_mix));
 
@@ -321,28 +359,60 @@ pub fn render_sample(genome: &PatchGenome, note: f32, duration: f64) -> Vec<f32>
     buffer
 }
 
-/// Helper: ADSR with Hold time (gate).
-/// a, d, s, r are standard parameters. `hold` is the time the key is pressed.
-fn adsr_fixed(
+/// Helper: ADSR with Curve control.
+/// curve = 1.0 (linear).
+/// curve > 1.0: Attack becomes convex (punchy), Decay/Release become concave (natural analog).
+/// curve < 1.0: Opposite (slow attack, linear-ish decay).
+fn adsr_curved(
     a: f32,
     d: f32,
     s: f32,
     r: f32,
     hold: f32,
+    curve: f32,
 ) -> An<impl AudioNode<Inputs = U0, Outputs = U1> + Clone> {
     envelope(move |t| {
         let t = t as f32;
         if t < a {
-            t / a
+            // Attack: 0 -> 1
+            // Use inverse curve for "convex" (charging capacitor) feel if curve > 1
+            let phase = t / a;
+            if curve > 1.0 {
+                phase.powf(1.0 / curve)
+            } else {
+                phase.powf(curve)
+            }
         } else if t < a + d {
-            1.0 + (s - 1.0) * (t - a) / d
+            // Decay: 1 -> s
+            let phase = (t - a) / d; // 0 -> 1
+            // Concave decay
+            let val = 1.0 - phase;
+            let curved_val = val.powf(curve);
+            s + (1.0 - s) * curved_val
         } else if t < a + d + hold {
+            // Sustain
             s
         } else if t < a + d + hold + r {
-            let rel_t = t - (a + d + hold);
-            s * (1.0 - rel_t / r)
+            // Release: s -> 0
+            let phase = (t - (a + d + hold)) / r; // 0 -> 1
+            let val = 1.0 - phase;
+            s * val.powf(curve)
         } else {
             0.0
+        }
+    })
+}
+
+/// Helper: Fade-in Envelope for LFOs
+fn lfo_fade(delay: f32, fade: f32) -> An<impl AudioNode<Inputs = U0, Outputs = U1> + Clone> {
+    envelope(move |t| {
+        let t = t as f32;
+        if t < delay {
+            0.0
+        } else if t < delay + fade {
+            (t - delay) / fade
+        } else {
+            1.0
         }
     })
 }

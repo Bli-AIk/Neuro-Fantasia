@@ -172,11 +172,18 @@ fn random_genome(rng: &mut ThreadRng) -> PatchGenome {
         // LFOs
         lfo1_rate: rng.gen_range(0.1..20.0),
         lfo1_amt_cutoff: rng.gen_range(0.0..1000.0),
+        lfo1_delay: rng.gen_range(0.0..1.0),
+        lfo1_fade: rng.gen_range(0.0..1.0),
 
         lfo2_rate: rng.gen_range(0.1..20.0),
         lfo2_amt_pitch: rng.gen_range(0.0..50.0),
+        lfo2_delay: rng.gen_range(0.0..1.0),
+        lfo2_fade: rng.gen_range(0.0..1.0),
 
         drive: rng.r#gen(),
+        saturation: rng.r#gen(),            // Pre-filter drive
+        env_curve: rng.gen_range(0.5..4.0), // Exponential envelope
+
         chorus_mix: rng.gen_range(0.0..0.5),
         reverb_mix: rng.gen_range(0.0..0.5),
         master_vol: 0.8,
@@ -237,17 +244,27 @@ fn crossover(g1: &PatchGenome, g2: &PatchGenome, rng: &mut ThreadRng) -> PatchGe
     if rng.gen_bool(0.5) {
         child.lfo1_rate = g2.lfo1_rate;
         child.lfo1_amt_cutoff = g2.lfo1_amt_cutoff;
+        child.lfo1_delay = g2.lfo1_delay;
+        child.lfo1_fade = g2.lfo1_fade;
     }
 
     // Block swap for LFO2
     if rng.gen_bool(0.5) {
         child.lfo2_rate = g2.lfo2_rate;
         child.lfo2_amt_pitch = g2.lfo2_amt_pitch;
+        child.lfo2_delay = g2.lfo2_delay;
+        child.lfo2_fade = g2.lfo2_fade;
     }
 
-    // FX
+    // FX & Structure
     if rng.gen_bool(0.5) {
         child.drive = g2.drive;
+    }
+    if rng.gen_bool(0.5) {
+        child.saturation = g2.saturation;
+    }
+    if rng.gen_bool(0.5) {
+        child.env_curve = g2.env_curve;
     }
     if rng.gen_bool(0.5) {
         child.chorus_mix = g2.chorus_mix;
@@ -301,12 +318,19 @@ fn mutate(g: &mut PatchGenome, rng: &mut ThreadRng) {
     // LFOs
     apply(&mut g.lfo1_rate, 0.1, 20.0);
     apply(&mut g.lfo1_amt_cutoff, 0.0, 2000.0);
+    apply(&mut g.lfo1_delay, 0.0, 2.0);
+    apply(&mut g.lfo1_fade, 0.0, 2.0);
 
     apply(&mut g.lfo2_rate, 0.1, 20.0);
     apply(&mut g.lfo2_amt_pitch, 0.0, 50.0);
+    apply(&mut g.lfo2_delay, 0.0, 2.0);
+    apply(&mut g.lfo2_fade, 0.0, 2.0);
 
-    // FX
+    // FX & Structure
     apply(&mut g.drive, 0.0, 1.0);
+    apply(&mut g.saturation, 0.0, 1.0);
+    apply(&mut g.env_curve, 0.5, 5.0);
+
     apply(&mut g.chorus_mix, 0.0, 1.0);
     apply(&mut g.reverb_mix, 0.0, 1.0);
 }
