@@ -149,18 +149,34 @@ fn random_genome(rng: &mut ThreadRng) -> PatchGenome {
         detune: rng.r#gen(),
         osc_mix: rng.r#gen(),
         noise_mix: rng.r#gen(),
-        attack: rng.gen_range(0.001..1.0),
-        decay: rng.gen_range(0.001..1.0),
-        sustain: rng.r#gen(),
-        release: rng.gen_range(0.001..2.0),
+
+        // Amp Env
+        amp_attack: rng.gen_range(0.001..2.0),
+        amp_decay: rng.gen_range(0.001..2.0),
+        amp_sustain: rng.r#gen(),
+        amp_release: rng.gen_range(0.001..2.0),
+
+        // Filter Env
+        filter_attack: rng.gen_range(0.001..2.0),
+        filter_decay: rng.gen_range(0.001..2.0),
+        filter_sustain: rng.r#gen(),
+        filter_release: rng.gen_range(0.001..2.0),
+        filter_env_amt: rng.gen_range(-1.0..1.0),
+
         cutoff: rng.r#gen(),
         resonance: rng.r#gen(),
         filter_type: rng.r#gen(),
-        filter_env_amt: rng.gen_range(-1.0..1.0),
-        lfo_rate: rng.gen_range(0.1..15.0),
-        lfo_amt_pitch: rng.gen_range(0.0..10.0),
-        lfo_amt_cutoff: rng.gen_range(0.0..1000.0),
+
+        // LFOs
+        lfo1_rate: rng.gen_range(0.1..20.0),
+        lfo1_amt_cutoff: rng.gen_range(0.0..1000.0),
+
+        lfo2_rate: rng.gen_range(0.1..20.0),
+        lfo2_amt_pitch: rng.gen_range(0.0..50.0),
+
         drive: rng.r#gen(),
+        chorus_mix: rng.gen_range(0.0..0.5),
+        reverb_mix: rng.gen_range(0.0..0.5),
         master_vol: 0.8,
     }
 }
@@ -187,12 +203,21 @@ fn crossover(g1: &PatchGenome, g2: &PatchGenome, rng: &mut ThreadRng) -> PatchGe
         child.noise_mix = g2.noise_mix;
     }
 
-    // Block swap for ADSR
+    // Block swap for Amp ADSR
     if rng.gen_bool(0.5) {
-        child.attack = g2.attack;
-        child.decay = g2.decay;
-        child.sustain = g2.sustain;
-        child.release = g2.release;
+        child.amp_attack = g2.amp_attack;
+        child.amp_decay = g2.amp_decay;
+        child.amp_sustain = g2.amp_sustain;
+        child.amp_release = g2.amp_release;
+    }
+
+    // Block swap for Filter ADSR
+    if rng.gen_bool(0.5) {
+        child.filter_attack = g2.filter_attack;
+        child.filter_decay = g2.filter_decay;
+        child.filter_sustain = g2.filter_sustain;
+        child.filter_release = g2.filter_release;
+        child.filter_env_amt = g2.filter_env_amt;
     }
 
     // Block swap for Filter
@@ -200,18 +225,29 @@ fn crossover(g1: &PatchGenome, g2: &PatchGenome, rng: &mut ThreadRng) -> PatchGe
         child.cutoff = g2.cutoff;
         child.resonance = g2.resonance;
         child.filter_type = g2.filter_type;
-        child.filter_env_amt = g2.filter_env_amt;
     }
 
-    // Block swap for LFO
+    // Block swap for LFO1
     if rng.gen_bool(0.5) {
-        child.lfo_rate = g2.lfo_rate;
-        child.lfo_amt_pitch = g2.lfo_amt_pitch;
-        child.lfo_amt_cutoff = g2.lfo_amt_cutoff;
+        child.lfo1_rate = g2.lfo1_rate;
+        child.lfo1_amt_cutoff = g2.lfo1_amt_cutoff;
     }
 
+    // Block swap for LFO2
+    if rng.gen_bool(0.5) {
+        child.lfo2_rate = g2.lfo2_rate;
+        child.lfo2_amt_pitch = g2.lfo2_amt_pitch;
+    }
+
+    // FX
     if rng.gen_bool(0.5) {
         child.drive = g2.drive;
+    }
+    if rng.gen_bool(0.5) {
+        child.chorus_mix = g2.chorus_mix;
+    }
+    if rng.gen_bool(0.5) {
+        child.reverb_mix = g2.reverb_mix;
     }
 
     child
@@ -236,19 +272,33 @@ fn mutate(g: &mut PatchGenome, rng: &mut ThreadRng) {
     apply(&mut g.osc_mix, 0.0, 1.0);
     apply(&mut g.noise_mix, 0.0, 1.0);
 
-    apply(&mut g.attack, 0.001, 2.0);
-    apply(&mut g.decay, 0.001, 2.0);
-    apply(&mut g.sustain, 0.0, 1.0);
-    apply(&mut g.release, 0.001, 5.0);
+    // Amp
+    apply(&mut g.amp_attack, 0.001, 2.0);
+    apply(&mut g.amp_decay, 0.001, 2.0);
+    apply(&mut g.amp_sustain, 0.0, 1.0);
+    apply(&mut g.amp_release, 0.001, 5.0);
 
+    // Filter Env
+    apply(&mut g.filter_attack, 0.001, 2.0);
+    apply(&mut g.filter_decay, 0.001, 2.0);
+    apply(&mut g.filter_sustain, 0.0, 1.0);
+    apply(&mut g.filter_release, 0.001, 5.0);
+    apply(&mut g.filter_env_amt, -1.0, 1.0);
+
+    // Filter
     apply(&mut g.cutoff, 0.0, 1.0);
     apply(&mut g.resonance, 0.0, 1.0);
     apply(&mut g.filter_type, 0.0, 1.0);
-    apply(&mut g.filter_env_amt, -1.0, 1.0);
 
-    apply(&mut g.lfo_rate, 0.1, 20.0);
-    apply(&mut g.lfo_amt_pitch, 0.0, 50.0);
-    apply(&mut g.lfo_amt_cutoff, 0.0, 2000.0);
+    // LFOs
+    apply(&mut g.lfo1_rate, 0.1, 20.0);
+    apply(&mut g.lfo1_amt_cutoff, 0.0, 2000.0);
 
+    apply(&mut g.lfo2_rate, 0.1, 20.0);
+    apply(&mut g.lfo2_amt_pitch, 0.0, 50.0);
+
+    // FX
     apply(&mut g.drive, 0.0, 1.0);
+    apply(&mut g.chorus_mix, 0.0, 1.0);
+    apply(&mut g.reverb_mix, 0.0, 1.0);
 }

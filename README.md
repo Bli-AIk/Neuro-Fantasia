@@ -24,8 +24,10 @@ In the future, it may also support direct export to game engines like Bevy or VS
 ## Features
 
 * **Genetic Evolution**: Uses Tournament Selection, Crossover, and Mutation to find the best parameters.
-* **Subtractive Synthesis Engine**: Built on `fundsp`, featuring Wavetables, Noise, ADSR Envelopes, and Multi-mode
-  Filters.
+* **Advanced Subtractive Engine**:
+    * **Dual Envelopes**: Independent ADSR for Amplitude and Filter (Timbre) control.
+    * **Dual LFOs**: Dedicated LFOs for Vibrato (Pitch) and Wah/PWM (Filter).
+    * **Sorted Wavetables**: Automatically sorts thousands of waveforms by brightness for smoother evolution.
 * **Multi-Target Training**: Train on multiple pitches of the same instrument for higher accuracy.
 * **Resume Capability**: Stop and resume training at any time.
 * **Similarity Threshold**: Automatically stop when a desired similarity percentage is reached.

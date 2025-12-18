@@ -21,25 +21,36 @@ pub struct PatchGenome {
     pub osc_mix: f32,
     pub noise_mix: f32,
 
-    // --- Envelope / 包络 (ADSR) ---
-    pub attack: f32,
-    pub decay: f32,
-    pub sustain: f32,
-    pub release: f32,
+    // --- Amp Envelope / 音量包络 (ADSR) ---
+    pub amp_attack: f32,
+    pub amp_decay: f32,
+    pub amp_sustain: f32,
+    pub amp_release: f32,
+
+    // --- Filter Envelope / 滤波器包络 (ADSR) ---
+    pub filter_attack: f32,
+    pub filter_decay: f32,
+    pub filter_sustain: f32,
+    pub filter_release: f32,
+    pub filter_env_amt: f32,
 
     // --- Filter / 滤波器 ---
     pub cutoff: f32,
     pub resonance: f32,
     pub filter_type: f32,
-    pub filter_env_amt: f32,
 
-    // --- LFO / 低频振荡器 ---
-    pub lfo_rate: f32,
-    pub lfo_amt_pitch: f32,
-    pub lfo_amt_cutoff: f32,
+    // --- LFO 1 (Modulation/Filter/PWM) ---
+    pub lfo1_rate: f32,
+    pub lfo1_amt_cutoff: f32,
+
+    // --- LFO 2 (Vibrato/Pitch) ---
+    pub lfo2_rate: f32,
+    pub lfo2_amt_pitch: f32,
 
     // --- FX & Output / 效果与输出 ---
     pub drive: f32,
+    pub chorus_mix: f32,
+    pub reverb_mix: f32,
     pub master_vol: f32,
 }
 
@@ -51,18 +62,31 @@ impl Default for PatchGenome {
             detune: 0.0,
             osc_mix: 0.5,
             noise_mix: 0.0,
-            attack: 0.01,
-            decay: 0.1,
-            sustain: 0.8,
-            release: 0.1,
+
+            amp_attack: 0.01,
+            amp_decay: 0.1,
+            amp_sustain: 0.8,
+            amp_release: 0.1,
+
+            filter_attack: 0.01,
+            filter_decay: 0.1,
+            filter_sustain: 0.5,
+            filter_release: 0.1,
+            filter_env_amt: 0.0,
+
             cutoff: 0.8,
             resonance: 0.2,
             filter_type: 0.0,
-            filter_env_amt: 0.0,
-            lfo_rate: 1.0,
-            lfo_amt_pitch: 0.0,
-            lfo_amt_cutoff: 0.0,
+
+            lfo1_rate: 1.0,
+            lfo1_amt_cutoff: 0.0,
+
+            lfo2_rate: 5.0,
+            lfo2_amt_pitch: 0.0,
+
             drive: 0.0,
+            chorus_mix: 0.0,
+            reverb_mix: 0.0,
             master_vol: 0.8,
         }
     }
@@ -127,7 +151,7 @@ impl AudioNode for WavetableOsc {
 
 /// Creates a playable DSP graph from the genome.
 /// 根据基因组创建一个可播放的 DSP 图。
-pub fn create_graph(genome: &PatchGenome, midi_note: f32) -> Box<dyn AudioUnit> {
+pub fn create_graph(genome: &PatchGenome, midi_note: f32, duration: f64) -> Box<dyn AudioUnit> {
     let hz = midi_to_hz(midi_note);
 
     // Ensure wavetables are loaded.
@@ -140,11 +164,15 @@ pub fn create_graph(genome: &PatchGenome, midi_note: f32) -> Box<dyn AudioUnit> 
     let table2 = bank.get(table2_idx);
 
     // --- LFO Section ---
-    let lfo = sine_hz(genome.lfo_rate);
-    let pitch_mod = lfo.clone() * genome.lfo_amt_pitch;
+    // LFO1: Filter / Timbre Modulation
+    let lfo1 = sine_hz(genome.lfo1_rate);
+    let cutoff_mod = lfo1 * genome.lfo1_amt_cutoff;
+
+    // LFO2: Pitch / Vibrato
+    let lfo2 = sine_hz(genome.lfo2_rate);
+    let pitch_mod = lfo2 * genome.lfo2_amt_pitch;
 
     // --- Oscillators ---
-    // Use custom WavetableOsc
     let osc1_node = An(WavetableOsc::new(table1));
     let osc2_node = An(WavetableOsc::new(table2));
 
@@ -158,67 +186,90 @@ pub fn create_graph(genome: &PatchGenome, midi_note: f32) -> Box<dyn AudioUnit> 
     // --- Mixer ---
     let osc_blended = (osc1 * (1.0 - genome.osc_mix)) + (osc2 * genome.osc_mix);
 
-    // Noise with dedicated Envelope (Attack only)
-    // 噪声带有专用包络（仅起音）
-    let noise_env = adsr_fixed(0.005, 0.1, 0.0, 0.0, 0.0); // Fast attack, short decay
+    // Noise (Attack transient)
+    let noise_env = adsr_fixed(0.005, 0.1, 0.0, 0.0, 0.0);
     let noise_src = (pink() * noise_env) * genome.noise_mix;
 
     let src_mono = (osc_blended * (1.0 - genome.noise_mix)) + noise_src;
 
-    // --- Main Envelope ---
-    let env_node = adsr_fixed(
-        genome.attack,
-        genome.decay,
-        genome.sustain,
-        genome.release,
-        1.0,
+    // --- Envelopes ---
+    // Hold time is set to duration to simulate key press length
+    let hold_time = duration as f32;
+
+    let amp_env = adsr_fixed(
+        genome.amp_attack,
+        genome.amp_decay,
+        genome.amp_sustain,
+        genome.amp_release,
+        hold_time,
+    );
+
+    let filter_env = adsr_fixed(
+        genome.filter_attack,
+        genome.filter_decay,
+        genome.filter_sustain,
+        genome.filter_release,
+        hold_time,
     );
 
     // --- Filter Modulation ---
-    let env_mod = env_node.clone() * genome.filter_env_amt;
-    let lfo_mod = lfo * genome.lfo_amt_cutoff;
+    let env_mod = filter_env * genome.filter_env_amt;
 
-    // Logarithmic Cutoff Mapping
-    // 20Hz * (1000)^cutoff -> range 20Hz to 20kHz
+    // Logarithmic Cutoff
     let cutoff_hz_base = 20.0 * (1000.0f32).powf(genome.cutoff);
 
-    let raw_cutoff = dc(cutoff_hz_base) + (env_mod * 1000.0) + (lfo_mod * 500.0);
+    // Combine modulations: Base + Env + LFO
+    let raw_cutoff = dc(cutoff_hz_base) + (env_mod * 1000.0) + (cutoff_mod * 0.5);
     let clamped_cutoff = raw_cutoff >> map(|x: &Frame<f32, U1>| x[0].clamp(20.0, 20000.0));
 
     let q = dc(genome.resonance * 10.0 + 0.1);
 
-    // Apply Amp Envelope
-    let src_with_env = src_mono * env_node.clone();
+    // --- Drive & Amp ---
+    // Move post-chain creation inside closure or use helper
+    // We used a helper `create_post_chain`.
 
-    // --- Drive ---
-    let drive_amt = 1.0 + genome.drive * 5.0;
-    let driven = src_with_env >> (pass() * drive_amt);
-    let saturated = driven >> map(|x: &Frame<f32, U1>| x[0].tanh());
+    // Fix lifetime: Copy fields needed by closure
+    let g_drive = genome.drive;
+    let _g_reverb_mix = genome.reverb_mix; // Unused for now
+    let g_master_vol = genome.master_vol;
 
-    let final_vol = genome.master_vol;
+    // --- Filter Branching & Final Chain ---
+    // We simplify to Mono output to guarantee type safety.
+    // Stereo/Reverb features are temporarily disabled until type inference issues are resolved.
+    let make_full_graph = move |mode: i32| -> Box<dyn AudioUnit> {
+        let c = clamped_cutoff.clone();
+        let q_val = q.clone();
+        let src = src_mono.clone();
 
-    // --- Filter Branching ---
-    let make_graph = |mode: i32| -> Box<dyn AudioUnit> {
-        let cutoff_node = clamped_cutoff.clone();
-        let q_node = q.clone();
-        let src_node = saturated.clone();
-        let vol_node = mul(final_vol);
+        let drive_amt = 1.0 + g_drive * 5.0;
+
+        // U1 -> U1
+        // Explicitly typed Identity node to enforce U1 input
+        let input_forced = map(|f: &Frame<f32, U1>| f.clone());
+
+        let drive = (input_forced * drive_amt) >> map(|f: &Frame<f32, U1>| f[0].tanh());
+
+        // Force amp_env to be treated as U1
+        let amp_forced = amp_env.clone() >> map(|f: &Frame<f32, U1>| f.clone());
+
+        // U1
+        let mono = (drive * amp_forced) * g_master_vol;
 
         if mode == 0 {
-            Box::new(((src_node | cutoff_node | q_node) >> lowpass()) >> vol_node >> split::<U2>())
+            Box::new((src | c | q_val) >> lowpass() >> mono)
         } else if mode == 1 {
-            Box::new(((src_node | cutoff_node | q_node) >> highpass()) >> vol_node >> split::<U2>())
+            Box::new((src | c | q_val) >> highpass() >> mono)
         } else {
-            Box::new(((src_node | cutoff_node | q_node) >> bandpass()) >> vol_node >> split::<U2>())
+            Box::new((src | c | q_val) >> bandpass() >> mono)
         }
     };
 
     if genome.filter_type < 0.33 {
-        make_graph(0)
+        make_full_graph(0)
     } else if genome.filter_type < 0.66 {
-        make_graph(1)
+        make_full_graph(1)
     } else {
-        make_graph(2)
+        make_full_graph(2)
     }
 }
 
@@ -227,9 +278,13 @@ fn midi_to_hz(note: f32) -> f32 {
 }
 
 pub fn render_sample(genome: &PatchGenome, note: f32, duration: f64) -> Vec<f32> {
-    let mut graph = create_graph(genome, note);
+    // We add a bit of tail time for release and reverb
+    let tail = genome.amp_release as f64 + 1.0;
+    let total_duration = duration + tail;
+
+    let mut graph = create_graph(genome, note, duration);
     let sample_rate = 44100.0;
-    let samples = (duration * sample_rate as f64) as usize;
+    let samples = (total_duration * sample_rate as f64) as usize;
 
     let mut buffer = Vec::with_capacity(samples);
 

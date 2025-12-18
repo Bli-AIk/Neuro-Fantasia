@@ -91,7 +91,24 @@ impl WavetableBank {
             bank.tables.push(Arc::new(sawtooth));
             bank.names.push("fallback_saw".to_string());
         } else {
-            println!("Loaded {} wavetables.", bank.tables.len()); // 已加载 X 个波表
+            // Sort wavetables by brightness to make the search space smoother
+            // 按亮度对波表进行排序，使搜索空间更平滑
+            let mut zipped: Vec<(f32, Arc<Vec<f32>>, String)> = bank
+                .tables
+                .iter()
+                .zip(bank.names.iter())
+                .map(|(t, n)| {
+                    let brightness = calculate_brightness(t);
+                    (brightness, t.clone(), n.clone())
+                })
+                .collect();
+
+            zipped.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+            bank.tables = zipped.iter().map(|x| x.1.clone()).collect();
+            bank.names = zipped.iter().map(|x| x.2.clone()).collect();
+
+            println!("Loaded and sorted {} wavetables.", bank.tables.len()); // 已加载并排序 X 个波表
         }
 
         Ok(bank)
@@ -109,6 +126,14 @@ impl WavetableBank {
     pub fn len(&self) -> usize {
         self.tables.len()
     }
+}
+
+fn calculate_brightness(table: &[f32]) -> f32 {
+    let mut sum = 0.0;
+    for i in 1..table.len() {
+        sum += (table[i] - table[i - 1]).abs();
+    }
+    sum
 }
 
 /// Helper function to load, resample, and normalize a single WAV file.
