@@ -86,9 +86,23 @@ fn main() -> Result<()> {
     println!("Loaded {} target sample(s).", targets.len());
 
     // 3. Load Resume Patch
+    let mut start_gen = 0;
     let seed_genome = if let Some(path) = &args.resume {
         if path.exists() {
             println!("Resuming from {:?}", path);
+
+            // Try to parse generation from filename: gen_0050_loss_...
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                if stem.starts_with("gen_") {
+                    if let Some(gen_part) = stem.split('_').nth(1) {
+                        if let Ok(g) = gen_part.parse::<usize>() {
+                            println!("Detected start generation: {}", g);
+                            start_gen = g;
+                        }
+                    }
+                }
+            }
+
             let file = File::open(path)?;
             Some(serde_json::from_reader(file)?)
         } else {
@@ -116,11 +130,15 @@ fn main() -> Result<()> {
 
     // 4. Initialize GA
     let mut ga = GeneticAlgorithm::new(args.pop, targets, seed_genome);
+    ga.generation = start_gen;
 
-    println!("Starting evolution for {} generations...", args.gens);
+    println!(
+        "Starting evolution for {} generations (from {}) ...",
+        args.gens, start_gen
+    );
 
     // 5. Evolution Loop
-    for i in 0..args.gens {
+    for i in start_gen..(start_gen + args.gens) {
         ga.evolve();
 
         let best = ga.best_individual();
@@ -153,7 +171,7 @@ fn main() -> Result<()> {
         best.loss,
         100.0 / (1.0 + best.loss)
     );
-    save_checkpoint(&args, args.gens, best.loss, &best.genome)?;
+    save_checkpoint(&args, start_gen + args.gens, best.loss, &best.genome)?;
 
     // Save as "latest.json" for convenience
     let latest_path = args.out_dir.join("latest.json");
