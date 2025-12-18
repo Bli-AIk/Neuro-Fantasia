@@ -140,18 +140,22 @@ fn main() -> Result<()> {
 
     let bar = ProgressBar::new(args.save_interval as u64);
     bar.set_style(
-        ProgressStyle::with_template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} steps")
-            .unwrap()
-            .progress_chars("=>-"),
+        ProgressStyle::with_template(
+            "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} steps | {msg}",
+        )
+        .unwrap()
+        .progress_chars("=>-"),
     );
 
     // 5. Evolution Loop
     for i in start_gen..(start_gen + args.gens) {
         ga.evolve();
-        bar.inc(1);
 
         let best = ga.best_individual();
         let current_sim = 100.0 / (1.0 + best.loss);
+
+        bar.set_message(format!("Loss: {:.4} Sim: {:.2}%", best.loss, current_sim));
+        bar.inc(1);
 
         if i % args.save_interval == 0 {
             bar.finish_and_clear(); // Clear bar to print log without conflict
@@ -161,6 +165,10 @@ fn main() -> Result<()> {
             );
             save_checkpoint(&args, i, best.loss, &best.genome)?;
             bar.reset(); // Reset bar for next interval
+            // Restore style/message if reset clears it?
+            // reset() clears state but keeps style. Message is cleared.
+            // We need to set message again for the new bar if we want it immediately,
+            // but the next loop iteration will set it.
         }
 
         if let Some(thresh) = stop_loss {
