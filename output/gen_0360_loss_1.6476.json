@@ -1,0 +1,20 @@
+{
+  "osc1_idx": 0.64463943,
+  "osc2_idx": 0.35209888,
+  "detune": 0.8915504,
+  "osc_mix": 0.31006518,
+  "noise_mix": 0.1306545,
+  "attack": 0.05823398,
+  "decay": 0.94149613,
+  "sustain": 0.2825024,
+  "release": 1.8760017,
+  "cutoff": 0.87088066,
+  "resonance": 0.08164687,
+  "filter_type": 0.71455204,
+  "filter_env_amt": -1.0,
+  "lfo_rate": 11.128332,
+  "lfo_amt_pitch": 2.1185887,
+  "lfo_amt_cutoff": 12.049779,
+  "drive": 0.51727873,
+  "master_vol": 0.8
+}
