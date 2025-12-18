@@ -20,12 +20,6 @@ use std::path::{Path, PathBuf};
 struct Args {
     /// Path to the target folder containing 'dataset.json' and audio files, OR path to a single wav file.
     /// 包含 'dataset.json' 和音频文件的目标文件夹路径，或者单个 wav 文件路径。
-    ///
-    /// If a folder is provided, it looks for `dataset.json` inside.
-    /// 如果提供文件夹，它将在其中查找 `dataset.json`。
-    ///
-    /// If a single file is provided, use `--note` to specify pitch.
-    /// 如果提供单个文件，请使用 `--note` 指定音高。
     #[arg(short, long)]
     target: PathBuf,
 
@@ -54,6 +48,12 @@ struct Args {
     #[arg(long, default_value_t = 1000)]
     gens: usize,
 
+    /// Stop training when similarity reaches this percentage (0-100).
+    /// 当相似度达到此百分比（0-100）时停止训练。
+    /// Calculated as: Similarity = 100% / (1.0 + Loss)
+    #[arg(long)]
+    similarity: Option<f32>,
+
     /// Resume training from a previous patch JSON file.
     /// 从以前的音色 JSON 文件恢复训练。
     #[arg(long)]
@@ -79,7 +79,7 @@ struct DatasetEntry {
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    println!("--- Neuro-Fantasia: Sound Matcher ---");
+    println!("-- Neuro-Fantasia: Sound Matcher --");
 
     // 1. Load Resources / 1. 加载资源
     println!("Loading wavetables from '{}'...", args.assets);
@@ -119,6 +119,23 @@ fn main() -> Result<()> {
         None
     };
 
+    // Calculate loss threshold from similarity
+    // 计算基于相似度的损失阈值
+    let stop_loss = if let Some(sim_percent) = args.similarity {
+        // Similarity = 100 / (1 + Loss)
+        // 1 + Loss = 100 / Similarity
+        // Loss = (100 / Similarity) - 1
+        let sim = sim_percent.clamp(0.1, 100.0);
+        let thresh = (100.0 / sim) - 1.0;
+        println!(
+            "Target Similarity: {:.1}% (Stop when Loss <= {:.5})",
+            sim, thresh
+        );
+        Some(thresh)
+    } else {
+        None
+    };
+
     // 4. Initialize GA / 4. 初始化遗传算法
     let mut ga = GeneticAlgorithm::new(args.pop, targets, seed_genome);
 
@@ -128,31 +145,49 @@ fn main() -> Result<()> {
     for i in 0..args.gens {
         ga.evolve();
 
-        if i % args.save_interval == 0 {
-            let best = ga.best_individual();
-            println!("Gen {}: Loss = {:.5}", i, best.loss);
+        let best = ga.best_individual();
+        let current_sim = 100.0 / (1.0 + best.loss);
 
+        if i % args.save_interval == 0 {
+            println!(
+                "Gen {}: Loss = {:.5} (Sim: {:.2}%)",
+                i, best.loss, current_sim
+            );
             // Periodic save / 定期保存
             save_patch(&best.genome, &args.out)?;
+        }
+
+        // Check stopping condition / 检查停止条件
+        if let Some(thresh) = stop_loss {
+            if best.loss <= thresh {
+                println!("\nTarget similarity reached!");
+                println!(
+                    "Gen {}: Loss = {:.5} (Sim: {:.2}%)",
+                    i, best.loss, current_sim
+                );
+                save_patch(&best.genome, &args.out)?;
+                break;
+            }
         }
     }
 
     let best = ga.best_individual();
-    println!("Final Result: Loss = {:.5}", best.loss);
+    println!(
+        "Final Result: Loss = {:.5} (Sim: {:.2}%)",
+        best.loss,
+        100.0 / (1.0 + best.loss)
+    );
     save_patch(&best.genome, &args.out)?;
     println!("Saved best patch to {:?}", args.out);
 
     Ok(())
 }
 
-/// Loads targets based on whether input is a file or directory.
-/// 根据输入是文件还是目录加载目标。
 fn load_targets(args: &Args) -> Result<Vec<(f32, AudioFeatures)>> {
     let mut results = Vec::new();
     let path = &args.target;
 
     if path.is_dir() {
-        // Look for dataset.json
         let config_path = path.join("dataset.json");
         if !config_path.exists() {
             anyhow::bail!(
@@ -175,7 +210,6 @@ fn load_targets(args: &Args) -> Result<Vec<(f32, AudioFeatures)>> {
             results.push((entry.note, features));
         }
     } else {
-        // Single file mode
         println!("Loading single target: {:?} (Note: {})", path, args.note);
         let audio = load_audio_file(path)?;
         let features = extract_features(&audio, 44100);
@@ -185,8 +219,6 @@ fn load_targets(args: &Args) -> Result<Vec<(f32, AudioFeatures)>> {
     Ok(results)
 }
 
-/// Helper to load a wav file into a mono float vector.
-/// 将 wav 文件加载到单声道浮点向量的辅助函数。
 fn load_audio_file(path: &Path) -> Result<Vec<f32>> {
     let mut reader =
         hound::WavReader::open(path).with_context(|| format!("Failed to open wav: {:?}", path))?;
@@ -203,7 +235,6 @@ fn load_audio_file(path: &Path) -> Result<Vec<f32>> {
         }
     };
 
-    // Mixdown to Mono if stereo
     let channels = spec.channels as usize;
     let frames = raw_samples.len() / channels;
     let mut mono = Vec::with_capacity(frames);
