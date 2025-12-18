@@ -23,7 +23,7 @@ struct Args {
     #[arg(long, default_value_t = 60.0)]
     note: f32,
 
-    #[arg(short, long, default_value = "assets/AKWF")]
+    #[arg(short, long, default_value = "assets")]
     assets: String,
 
     #[arg(short, long, default_value_t = 100)]

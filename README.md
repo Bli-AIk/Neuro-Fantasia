@@ -137,6 +137,24 @@ This project uses the following key crates:
 | [clap](https://crates.io/crates/clap)       | CLI argument parsing         |
 | [serde](https://crates.io/crates/serde)     | Serialization for JSON       |
 
+## Credits
+
+This project includes or utilizes the following audio resources:
+
+* **Adventure Kid Waveforms (AKWF)** by Kristoffer Ekstrand.
+  * Public Domain / CC0.
+  * Source: [https://www.adventurekid.se/akrt/waveforms/](https://www.adventurekid.se/akrt/waveforms/)
+
+* **Virtual Playing Orchestra 3** by Paul Battersby.
+  * Used for extracting single-cycle waveforms for training.
+  * Source: [http://virtualplaying.com](http://virtualplaying.com)
+  * Incorporates samples from:
+    * **Sonatina Symphonic Orchestra** (Creative Commons Sampling Plus 1.0)
+    * **No Budget Orchestra** (CC BY-SA 4.0)
+    * **VSCO 2 Community Edition** (CC0 1.0)
+    * **University of Iowa Electronic Music Studios**
+    * **Philharmonia Orchestra** (CC BY-SA 3.0)
+
 ## Contributing
 
 Contributions are welcome!

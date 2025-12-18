@@ -133,9 +133,27 @@
 | [rustfft](https://crates.io/crates/rustfft) | 用于频谱分析的 FFT |
 | [rayon](https://crates.io/crates/rayon)     | 并行计算适应度     |
 | [clap](https://crates.io/crates/clap)       | CLI 参数解析    |
-| [serde](https://crates.io/crates/serde)     | JSON 序列化    |
+| [serde](https://crates.io/crates/serde)     | JSON 序列化支持              |
 
-## 贡献
+## 致谢 (Credits)
+
+本项目包含或使用了以下音频资源：
+
+* **Adventure Kid Waveforms (AKWF)** - Kristoffer Ekstrand
+  * 公有领域 / CC0。
+  * 来源: [https://www.adventurekid.se/akrt/waveforms/](https://www.adventurekid.se/akrt/waveforms/)
+
+* **Virtual Playing Orchestra 3** - Paul Battersby
+  * 用于提取训练所需的单周期波形。
+  * 来源: [http://virtualplaying.com](http://virtualplaying.com)
+  * 包含了来自以下的采样：
+    * **Sonatina Symphonic Orchestra** (Creative Commons Sampling Plus 1.0)
+    * **No Budget Orchestra** (CC BY-SA 4.0)
+    * **VSCO 2 Community Edition** (CC0 1.0)
+    * **University of Iowa Electronic Music Studios**
+    * **Philharmonia Orchestra** (CC BY-SA 3.0)
+
+## 贡献 (Contributing)
 
 欢迎贡献！
 无论是修复 Bug、添加新功能还是改进文档：
