@@ -70,14 +70,14 @@ In the future, it may also support direct export to game engines like Bevy or VS
 
    **Basic Single File:**
    ```bash
-   cargo run --release --bin trainer -- --target target.wav --note 60 --out result.json
+   cargo run --release --bin trainer -- --target target.wav --note 60 --out-dir output
    ```
 
    **Dataset Training (High Performance):**
    ```bash
    cargo run --release --bin trainer -- \
      --target my_instrument/ \
-     --out patch.json \
+     --out-dir output/ \
      --gens 10000 \
      --save-interval 50
    ```
@@ -86,7 +86,7 @@ In the future, it may also support direct export to game engines like Bevy or VS
    ```bash
    cargo run --release --bin trainer -- \
      --target my_instrument/ \
-     --out patch.json \
+     --out-dir output/ \
      --similarity 95.0
    ```
 
@@ -94,9 +94,11 @@ In the future, it may also support direct export to game engines like Bevy or VS
    ```bash
    cargo run --release --bin trainer -- \
      --target my_instrument/ \
-     --out patch.json \
-     --resume patch.json
+     --out-dir output/ \
+     --resume output/latest.json
    ```
+
+   *The trainer will automatically save `gen_XXXX_loss_YYYY.json` and `gen_XXXX_loss_YYYY.wav` files in the output directory.*
 
 ## How to Build
 

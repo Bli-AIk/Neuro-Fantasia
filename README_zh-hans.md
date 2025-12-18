@@ -67,14 +67,14 @@
 
    **基础单文件训练:**
    ```bash
-   cargo run --release --bin trainer -- --target target.wav --note 60 --out result.json
+   cargo run --release --bin trainer -- --target target.wav --note 60 --out-dir output
    ```
 
    **数据集训练 (高性能模式):**
    ```bash
    cargo run --release --bin trainer -- \
      --target my_instrument/ \
-     --out patch.json \
+     --out-dir output/ \
      --gens 10000 \
      --save-interval 50
    ```
@@ -83,7 +83,7 @@
    ```bash
    cargo run --release --bin trainer -- \
      --target my_instrument/ \
-     --out patch.json \
+     --out-dir output/ \
      --similarity 95.0
    ```
 
@@ -91,9 +91,11 @@
    ```bash
    cargo run --release --bin trainer -- \
      --target my_instrument/ \
-     --out patch.json \
-     --resume patch.json
+     --out-dir output/ \
+     --resume output/latest.json
    ```
+
+   *训练器会自动在输出目录中保存 `gen_XXXX_loss_YYYY.json` 和 `gen_XXXX_loss_YYYY.wav` 文件。*
 
 ## 如何构建
 
