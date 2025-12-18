@@ -58,6 +58,14 @@ pub struct PatchGenome {
     pub lfo2_delay: f32,
     pub lfo2_fade: f32,
 
+    // --- DSP Enhancements (New) ---
+    pub comb_mix: f32,
+    pub comb_delay: f32, // 0.0 - 1.0 mapping to range
+    pub comb_feedback: f32,
+
+    pub asym_drive: f32,
+    pub asym_mix: f32,
+
     // --- FX & Output / 效果与输出 ---
     pub drive: f32,      // Post-filter drive
     pub saturation: f32, // Pre-filter saturation
@@ -106,6 +114,12 @@ impl Default for PatchGenome {
             lfo2_amt_pitch: 0.0,
             lfo2_delay: 0.0,
             lfo2_fade: 0.1,
+
+            comb_mix: 0.0,
+            comb_delay: 0.2,
+            comb_feedback: 0.5,
+            asym_drive: 0.0,
+            asym_mix: 0.0,
 
             drive: 0.0,
             saturation: 0.0,
@@ -325,11 +339,22 @@ pub fn create_graph(genome: &PatchGenome, midi_note: f32, duration: f64) -> Box<
 
     let q = dc(genome.resonance * 10.0 + 0.1);
 
-    // --- Post-Filter Drive & Amp ---
+    // --- Post-Filter DSP (Drive, Comb, Asym) ---
     let g_drive = genome.drive;
+    let g_asym_mix = genome.asym_mix;
+    let g_asym_drive = genome.asym_drive;
+    let g_comb_mix = genome.comb_mix;
+    let g_comb_delay = genome.comb_delay;
+    let _g_comb_fb = genome.comb_feedback;
+
     let g_reverb_mix = genome.reverb_mix;
     let g_chorus_mix = genome.chorus_mix;
     let g_master_vol = genome.master_vol;
+
+    // Helper static ops for robust type inference & Clone support
+    fn op_force_u1(f: &Frame<f32, U1>) -> Frame<f32, U1> {
+        f.clone()
+    }
 
     // --- Filter Branching & Final Chain ---
     let make_full_graph = move |mode: i32| -> Box<dyn AudioUnit> {
@@ -339,13 +364,48 @@ pub fn create_graph(genome: &PatchGenome, midi_note: f32, duration: f64) -> Box<
 
         let drive_amt = 1.0 + g_drive * 5.0;
 
-        // Post-filter drive
-        let input_forced = map(|f: &Frame<f32, U1>| f.clone());
-        let drive = (input_forced * drive_amt) >> map(|f: &Frame<f32, U1>| f[0].tanh());
+        // Post-filter drive (Symmetric Tanh)
+        let input_forced = map(op_force_u1);
+        let sym_drive = (input_forced * drive_amt) >> map(|f: &Frame<f32, U1>| f[0].tanh());
 
-        // Amp
-        let amp_forced = amp_env.clone() >> map(|f: &Frame<f32, U1>| f.clone());
-        let mono_out = (drive * amp_forced) * g_master_vol;
+        // Asymmetric Distortion (Post-Filter)
+        // Adds even harmonics: x + a*x^2
+        let asym_amt = g_asym_drive * 5.0;
+        let asym_node = map(move |f: &Frame<f32, U1>| {
+            let x = f[0];
+            let distorted = x + asym_amt * x * x;
+            // Soft clip again to stay in range
+            distorted.tanh()
+        });
+
+        // Helper generator for U1 enforcement
+        let force_u1_gen = || map(op_force_u1);
+
+        // Blend Asym (Using explicit Split/Stack/Join)
+        // sym_drive (1) >> split (2) >> (dry | wet) (2) >> join (1)
+        let dry_drive = force_u1_gen();
+        let wet_drive = asym_node >> force_u1_gen();
+
+        let post_drive = sym_drive
+            >> split()
+            >> ((dry_drive * (1.0 - g_asym_mix)) | (wet_drive * g_asym_mix))
+            >> join::<U2>();
+
+        // Comb Filter
+        let delay_secs = 0.0001 + (g_comb_delay * 0.02);
+
+        // Feedforward Comb
+        let comb_dry = force_u1_gen();
+        let comb_wet = delay(delay_secs) >> force_u1_gen();
+
+        let post_comb = post_drive
+            >> split()
+            >> ((comb_dry * (1.0 - g_comb_mix)) | (comb_wet * g_comb_mix))
+            >> join::<U2>();
+
+        // Amp (VCA: Audio * Env)
+        let amp_forced = amp_env.clone() >> map(op_force_u1);
+        let mono_out = (post_comb * amp_forced) * g_master_vol;
 
         // FX Chain Construction
         // Chorus (Mono -> Stereo)

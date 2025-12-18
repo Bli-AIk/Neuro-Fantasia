@@ -61,7 +61,7 @@ impl GeneticAlgorithm {
             let mutants_count = pop_size / 3;
             for _ in 0..mutants_count {
                 let mut variant = seed_genome;
-                mutate(&mut variant, &mut rng);
+                mutate(&mut variant, &mut rng, 1.0); // High sigma for initial diversity
                 population.push(Individual::new(variant));
             }
         }
@@ -114,6 +114,13 @@ impl GeneticAlgorithm {
         let keep_count = self.population.len() / 10;
         let mut new_pop = self.population[0..keep_count].to_vec();
 
+        // Calculate Adaptive Sigma
+        // Decay from 1.0 down to 0.1 over time.
+        // Using exponential decay or simple linear mapping.
+        // Let's use a 1/(1+kt) decay which is robust.
+        let sigma_scale = 1.0 / (1.0 + self.generation as f32 * 0.005);
+        let sigma_scale = sigma_scale.max(0.1); // Clamp minimum mutation rate
+
         // 3. Breed to fill population
         // 3. 繁殖以填充种群
         let mut rng = thread_rng();
@@ -124,7 +131,7 @@ impl GeneticAlgorithm {
             let p2 = &self.population[dist_idx.sample(&mut rng)];
 
             let mut child_genome = crossover(&p1.genome, &p2.genome, &mut rng);
-            mutate(&mut child_genome, &mut rng);
+            mutate(&mut child_genome, &mut rng, sigma_scale);
 
             new_pop.push(Individual::new(child_genome));
         }
@@ -184,6 +191,13 @@ fn random_genome(rng: &mut ThreadRng) -> PatchGenome {
         lfo2_amt_pitch: rng.gen_range(0.0..50.0),
         lfo2_delay: rng.gen_range(0.0..1.0),
         lfo2_fade: rng.gen_range(0.0..1.0),
+
+        // DSP Enhancements
+        comb_mix: rng.r#gen(),
+        comb_delay: rng.r#gen(),
+        comb_feedback: rng.r#gen(),
+        asym_drive: rng.r#gen(),
+        asym_mix: rng.r#gen(),
 
         drive: rng.r#gen(),
         saturation: rng.r#gen(),            // Pre-filter drive
@@ -268,6 +282,17 @@ fn crossover(g1: &PatchGenome, g2: &PatchGenome, rng: &mut ThreadRng) -> PatchGe
         child.lfo2_fade = g2.lfo2_fade;
     }
 
+    // New DSP
+    if rng.gen_bool(0.5) {
+        child.comb_mix = g2.comb_mix;
+        child.comb_delay = g2.comb_delay;
+        child.comb_feedback = g2.comb_feedback;
+    }
+    if rng.gen_bool(0.5) {
+        child.asym_drive = g2.asym_drive;
+        child.asym_mix = g2.asym_mix;
+    }
+
     // FX & Structure
     if rng.gen_bool(0.5) {
         child.drive = g2.drive;
@@ -290,9 +315,10 @@ fn crossover(g1: &PatchGenome, g2: &PatchGenome, rng: &mut ThreadRng) -> PatchGe
 
 /// Applies Gaussian Mutation to genes.
 /// 将高斯变异应用于基因。
-fn mutate(g: &mut PatchGenome, rng: &mut ThreadRng) {
-    let mut_prob = 0.1;
-    let normal = Normal::new(0.0, 0.1).unwrap();
+fn mutate(g: &mut PatchGenome, rng: &mut ThreadRng, sigma_scale: f32) {
+    let mut_prob = 0.15; // Slightly increased base mutation probability
+    // Scale standard deviation by sigma_scale
+    let normal = Normal::new(0.0, 0.1 * sigma_scale).unwrap();
 
     let mut apply = |val: &mut f32, min: f32, max: f32| {
         if rng.gen_bool(mut_prob) {
@@ -342,6 +368,13 @@ fn mutate(g: &mut PatchGenome, rng: &mut ThreadRng) {
     apply(&mut g.lfo2_amt_pitch, 0.0, 50.0);
     apply(&mut g.lfo2_delay, 0.0, 2.0);
     apply(&mut g.lfo2_fade, 0.0, 2.0);
+
+    // New DSP
+    apply(&mut g.comb_mix, 0.0, 1.0);
+    apply(&mut g.comb_delay, 0.0, 1.0);
+    apply(&mut g.comb_feedback, 0.0, 0.95);
+    apply(&mut g.asym_drive, 0.0, 1.0);
+    apply(&mut g.asym_mix, 0.0, 1.0);
 
     // FX & Structure
     apply(&mut g.drive, 0.0, 1.0);
